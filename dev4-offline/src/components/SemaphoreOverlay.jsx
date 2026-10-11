@@ -1,12 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
-export default function SemaphoreOverlay({ status, onDismiss }) {
+const MOTIVOS = {
+  qr_invalido: 'QR inválido o alterado',
+  qr_vencido: 'QR vencido',
+  no_encontrado: 'El carné no está en el padrón de este celular',
+  ya_ingresado: 'Este QR ya se usó hoy',
+};
+
+export default function SemaphoreOverlay({ status, resultado, onDismiss }) {
   const [canDismiss, setCanDismiss] = useState(false);
 
   useEffect(() => {
     // Cuando el semáforo aparece, bloqueamos el toque por 2 segundos
+    // (el componente se vuelve a montar en cada escaneo, así que canDismiss empieza en false)
     if (status !== 'IDLE' && status !== 'PROCESSING') {
-      setCanDismiss(false);
       const timer = setTimeout(() => {
         setCanDismiss(true); // Después de 2 seg, ya se permite el toque
       }, 2000);
@@ -42,6 +49,14 @@ export default function SemaphoreOverlay({ status, onDismiss }) {
     >
       <span style={{ fontSize: '6rem', marginBottom: '1rem' }}>{current.icon}</span>
       <h1 style={{ fontSize: '3rem', fontWeight: '900', padding: '0 1rem', margin: 0 }}>{current.title}</h1>
+      {resultado?.carnet && (
+        <p style={{ fontSize: '1.4rem', margin: '1rem 1rem 0', fontWeight: 'bold' }}>
+          {resultado.nombre || 'Sin nombre'} · {resultado.carnet}
+        </p>
+      )}
+      {resultado && !resultado.ok && MOTIVOS[resultado.motivo] && (
+        <p style={{ fontSize: '1.1rem', margin: '0.5rem 1rem 0' }}>{MOTIVOS[resultado.motivo]}</p>
+      )}
       <p style={{ fontSize: '1.5rem', marginTop: '1.5rem', fontWeight: 'bold', backgroundColor: 'rgba(0,0,0,0.3)', padding: '0.5rem 1rem', borderRadius: '0.75rem' }}>
         {current.subtitle}
       </p>
