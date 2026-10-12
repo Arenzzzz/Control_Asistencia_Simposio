@@ -1,7 +1,7 @@
 -- ============================================================================
 -- 03_VIEWS.SQL
 -- Vistas Consolidadas de Auditoría y Reporte Académico
--- XIX Simposio de Ingeniería
+-- XIX Simposio de Ingeniería - Dev 2
 -- ============================================================================
 
 DROP VIEW IF EXISTS public.vista_asistencia_coordinacion CASCADE;

@@ -1,14 +1,15 @@
 -- ============================================================================
 -- 02_RPC_FUNCTIONS.SQL
--- Funciones Almacenadas Transaccionales y de Contingencia
--- XIX Simposio de Ingeniería
+-- Procedimientos Almacenados Transaccionales Atómicos (SECURITY DEFINER)
+-- XIX Simposio de Ingeniería - Dev 2
 -- ============================================================================
 
--- ----------------------------------------------------------------------------
--- 1. REGISTRO ATÓMICO EN PUERTA (Dev 3 - PWA Móvil)
--- ----------------------------------------------------------------------------
+-- 1. Check-in Atómico en Puertas (Dev 3 y Dev 4)
+-- Con bloqueo FOR UPDATE contra condiciones de carrera y soporte dual para token o carné
+DROP FUNCTION IF EXISTS public.registrar_checkin_atomico(character varying, integer, character varying, character varying);
+
 CREATE OR REPLACE FUNCTION public.registrar_checkin_atomico(
-    p_carnet VARCHAR,
+    p_token_o_carnet VARCHAR,
     p_dia INT,
     p_puerta VARCHAR,
     p_staff_id VARCHAR
@@ -18,26 +19,30 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
+    v_carnet VARCHAR;
     v_nombre VARCHAR;
     v_tickets_disponibles INT;
     v_hora_anterior TIMESTAMP WITH TIME ZONE;
     v_puerta_anterior VARCHAR;
 BEGIN
-    -- 1. Validar existencia en el padrón oficial
-    SELECT nombre_oficial INTO v_nombre
-    FROM public.padron_estudiantes 
-    WHERE carnet = p_carnet;
+    -- 1. Identificar al estudiante por token QR o carné directo
+    SELECT p.carnet, p.nombre_oficial
+    INTO v_carnet, v_nombre
+    FROM public.padron_estudiantes p
+    LEFT JOIN public.credenciales_qr c ON p.carnet = c.carnet
+    WHERE c.token_qr = p_token_o_carnet OR p.carnet = p_token_o_carnet;
 
     IF v_nombre IS NULL THEN
         RETURN jsonb_build_object(
             'status', 'ERROR',
             'code', 'QR_NO_ENCONTRADO',
-            'mensaje', 'Estudiante no registrado en padrón. Derivar a Mesa de Resolución.'
+            'mensaje', 'Credencial no registrada o no habilitada. Derivar a Mesa de Resolución.'
         );
     END IF;
 
-    -- 2. Bloqueo transaccional de fila para evitar condiciones de carrera (Race Conditions)
-    SELECT (tickets_totales - tickets_entregados) INTO v_tickets_disponibles
+    -- 2. Bloquear lote de inventario diario con FOR UPDATE
+    SELECT (tickets_totales - tickets_entregados)
+    INTO v_tickets_disponibles
     FROM public.inventario_tickets
     WHERE dia = p_dia
     FOR UPDATE;
@@ -58,10 +63,11 @@ BEGIN
         );
     END IF;
 
-    -- 3. Validar si ya cuenta con asistencia hoy
-    SELECT hora_checkin, puerta INTO v_hora_anterior, v_puerta_anterior
+    -- 3. Validar duplicidad de ingreso en la jornada
+    SELECT hora_checkin, puerta
+    INTO v_hora_anterior, v_puerta_anterior
     FROM public.checkins_asistencia 
-    WHERE carnet = p_carnet AND dia = p_dia;
+    WHERE carnet = v_carnet AND dia = p_dia;
 
     IF v_hora_anterior IS NOT NULL THEN
         RETURN jsonb_build_object(
@@ -71,9 +77,9 @@ BEGIN
         );
     END IF;
 
-    -- 4. Inserción y descuento atómico de inventario
+    -- 4. Inserción de asistencia y descuento del ticket físico
     INSERT INTO public.checkins_asistencia (carnet, dia, puerta, staff_id)
-    VALUES (p_carnet, p_dia, p_puerta, p_staff_id);
+    VALUES (v_carnet, p_dia, p_puerta, p_staff_id);
 
     UPDATE public.inventario_tickets
     SET tickets_entregados = tickets_entregados + 1
@@ -82,7 +88,7 @@ BEGIN
     RETURN jsonb_build_object(
         'status', 'OK',
         'code', 'ACCESO_CONCEDIDO',
-        'carnet', p_carnet,
+        'carnet', v_carnet,
         'nombre', v_nombre,
         'tickets_restantes', (v_tickets_disponibles - 1),
         'mensaje', 'Acceso autorizado. Entregar 1 ticket físico.'
@@ -91,8 +97,9 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 2. SINCRONIZACIÓN OFFLINE POR LOTES (Dev 4 - PWA Offline)
--- ----------------------------------------------------------------------------
+
+-- 2. Sincronización de Lotes Offline (Dev 4)
+-- Respeta la marca de tiempo del cliente, normaliza puertas y tolera carnés inválidos
 CREATE OR REPLACE FUNCTION public.sincronizar_checkins_offline(
     p_checkins JSONB
 )
@@ -120,17 +127,16 @@ BEGIN
         )
         ORDER BY hora_checkin ASC
     LOOP
-        -- Normalizar puerta (ej: "3" -> "Puerta 3")
+        -- Normalizar puerta
         IF v_item.puerta ~ '^[0-9]+$' THEN
             v_puerta_normalizada := 'Puerta ' || v_item.puerta;
         ELSE
             v_puerta_normalizada := COALESCE(v_item.puerta, 'Puerta Desconocida');
         END IF;
 
-        -- Priorizar marca temporal local de escaneo
         v_hora_real := COALESCE(v_item.hora_checkin, NOW());
 
-        -- Validar carné en padrón para no abortar por Foreign Key
+        -- Validar existencia en padrón para no abortar por Foreign Key
         SELECT EXISTS (
             SELECT 1 FROM public.padron_estudiantes WHERE carnet = v_item.carnet
         ) INTO v_estudiante_existe;
@@ -140,14 +146,8 @@ BEGIN
             CONTINUE;
         END IF;
 
-        -- Inserción segura con bloqueo de duplicados
-        INSERT INTO public.checkins_asistencia (
-            carnet, 
-            dia, 
-            puerta, 
-            staff_id, 
-            hora_checkin
-        )
+        -- Inserción segura ignorando duplicados
+        INSERT INTO public.checkins_asistencia (carnet, dia, puerta, staff_id, hora_checkin)
         VALUES (
             v_item.carnet, 
             v_item.dia, 
@@ -161,12 +161,10 @@ BEGIN
             UPDATE public.inventario_tickets
             SET tickets_entregados = tickets_entregados + 1
             WHERE dia = v_item.dia;
-            
             v_insertados := v_insertados + 1;
         ELSE
             v_duplicados := v_duplicados + 1;
         END IF;
-
     END LOOP;
 
     RETURN jsonb_build_object(
@@ -179,8 +177,9 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 3. RESOLUCIÓN DE EXCEPCIONES: PORTAL ZONA AMARILLA (Dev 4 - Web)
--- ----------------------------------------------------------------------------
+
+-- 3. Portal de Autogestión / Desempate de Zona Amarilla (Dev 4)
+-- Valida candidatos como objetos JSON e inserta en la tabla privada de QR
 CREATE OR REPLACE FUNCTION public.resolver_excepcion_estudiante(
     p_carnet VARCHAR,
     p_boleta VARCHAR
@@ -193,11 +192,10 @@ DECLARE
     v_nombre VARCHAR;
     v_correo VARCHAR;
     v_datos_extra JSONB;
-    v_boleta_existe BOOLEAN;
     v_es_candidato_valido BOOLEAN;
     v_token_qr VARCHAR;
 BEGIN
-    -- 1. Verificar carné en padrón oficial
+    -- Validar existencia en padrón oficial
     SELECT nombre_oficial, correo_institucional 
     INTO v_nombre, v_correo
     FROM public.padron_estudiantes
@@ -210,7 +208,7 @@ BEGIN
         );
     END IF;
 
-    -- 2. Obtener boleta en Zona Amarilla sin conciliar
+    -- Validar boleta pendiente en Zona Amarilla
     SELECT datos_extra 
     INTO v_datos_extra
     FROM public.tesoreria_pagos 
@@ -225,8 +223,7 @@ BEGIN
         );
     END IF;
 
-    -- 3. Validar si el carné ingresado está en la lista de candidatos que dejó el pipeline
-    -- Si el pipeline guardó un arreglo "candidatos", el carné DEBE estar dentro
+    -- Validar que el carné esté en la lista de candidatos estructurados como objetos
     IF v_datos_extra ? 'candidatos' THEN
         SELECT EXISTS (
             SELECT 1 
@@ -242,10 +239,16 @@ BEGIN
         END IF;
     END IF;
 
-    -- 4. Construir payload o token para el QR
+    -- Generar credencial QR y guardarla en la tabla privada
     v_token_qr := 'SIMP26-' || p_carnet;
 
-    -- 5. Promover a Zona VERDE y CONCILIADO
+    INSERT INTO public.credenciales_qr (carnet, token_qr, boleta_origen)
+    VALUES (p_carnet, v_token_qr, p_boleta)
+    ON CONFLICT (carnet) DO UPDATE 
+    SET token_qr = EXCLUDED.token_qr, 
+        boleta_origen = EXCLUDED.boleta_origen;
+
+    -- Actualizar estado contable a VERDE / CONCILIADO
     UPDATE public.tesoreria_pagos
     SET carnet_asignado = p_carnet,
         zona = 'VERDE',
@@ -258,7 +261,6 @@ BEGIN
         )
     WHERE boleta = p_boleta;
 
-    -- 6. Retornar datos al portal web para renderizar el QR en pantalla
     RETURN jsonb_build_object(
         'status', 'OK',
         'mensaje', 'Identidad confirmada exitosamente. Tu acceso ha sido habilitado.',
@@ -271,8 +273,8 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 4. CONTINGENCIA PRESENCIAL: MESA DE RESOLUCIÓN (Dev 5 - Laptop)
--- ----------------------------------------------------------------------------
+
+-- 4. Mesa de Resolución Presencial / Laptop de Contingencia (Dev 5)
 CREATE OR REPLACE FUNCTION public.resolver_checkin_manual(
     p_carnet VARCHAR,
     p_boleta VARCHAR,
@@ -293,7 +295,7 @@ BEGIN
     FROM public.padron_estudiantes WHERE carnet = p_carnet;
 
     IF v_nombre IS NULL THEN
-        RETURN jsonb_build_object('status', 'ERROR', 'mensaje', 'Carnet no encontrado en padrón.');
+        RETURN jsonb_build_object('status', 'ERROR', 'mensaje', 'Carné no encontrado en padrón.');
     END IF;
 
     SELECT EXISTS (
@@ -322,7 +324,11 @@ BEGIN
         UPDATE public.tesoreria_pagos
         SET estado = 'RESUELTO_MANUAL',
             carnet_asignado = p_carnet,
-            datos_extra = datos_extra || jsonb_build_object('justificacion', p_justificacion, 'operador', p_operador)
+            datos_extra = datos_extra || jsonb_build_object(
+                'justificacion', p_justificacion, 
+                'operador', p_operador,
+                'fecha_resolucion_manual', NOW()
+            )
         WHERE boleta = p_boleta;
     END IF;
 
