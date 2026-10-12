@@ -9,7 +9,7 @@ Módulo de base de datos relacional, control transaccional atómico contra condi
 ```text
 backend-db/
 ├── migrations/
-│   ├── 01_schema_and_policies.sql      # Tablas, índices y Row Level Security (RLS)
+│   ├── 01_schema_and_policies.sql      # Tablas, índices, tabla privada credenciales_qr y RLS
 │   ├── 02_rpc_functions.sql            # Funciones atómicas (puertas, offline, desempate y mesa)
 │   └── 03_views.sql                    # Vista consolidada para Coordinación Académica
 ├── tests/
