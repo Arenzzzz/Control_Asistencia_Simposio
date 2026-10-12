@@ -24,7 +24,8 @@ export default function ScannerComponent({ onScanResult, isProcessing }) {
       formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ] // Desactiva la búsqueda de códigos de barras
     };
 
-    html5QrCode.start(
+    let detenido = false;
+    const inicio = html5QrCode.start(
       { 
         facingMode: "environment" 
         // ¡Línea de focusMode eliminada para máxima estabilidad!
