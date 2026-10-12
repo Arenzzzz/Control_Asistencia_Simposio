@@ -4,19 +4,36 @@ import { guardarAjustes, leerAjustes } from '../config';
 
 const PAGINA = 1000; // Supabase devuelve como máximo 1000 filas por consulta
 
-async function traerTodo(tabla, columnas) {
+// Trae todas las filas en páginas de 1000. consulta = (desde, hasta) => petición de Supabase
+async function paginar(nombre, consulta) {
   const filas = [];
   for (let desde = 0; ; desde += PAGINA) {
-    const { data, error } = await supabase.from(tabla).select(columnas).range(desde, desde + PAGINA - 1);
-    if (error) throw new Error(`${tabla}: ${error.message}`);
+    const { data, error } = await consulta(desde, desde + PAGINA - 1);
+    if (error) throw new Error(`${nombre}: ${error.message}`);
     filas.push(...data);
     if (data.length < PAGINA) return filas;
   }
 }
 
+const traerTodo = (tabla, columnas) =>
+  paginar(tabla, (a, b) => supabase.from(tabla).select(columnas).range(a, b));
+
+// El padrón ya no se puede leer directo (protege los correos). Se usa la función
+// obtener_padron_movil, que solo entrega carné y nombre. Si aún no existe, se intenta la tabla.
+async function traerPadron() {
+  try {
+    return await paginar('obtener_padron_movil', (a, b) => supabase.rpc('obtener_padron_movil').range(a, b));
+  } catch (e) {
+    console.warn('No se pudo usar obtener_padron_movil, se intenta la tabla:', e.message);
+    return traerTodo('padron_estudiantes', 'carnet, nombre_oficial');
+  }
+}
+
 // Descarga el padrón y los ingresos ya registrados, y los guarda en el celular.
 export async function descargarPadron() {
-  const padron = await traerTodo('padron_estudiantes', 'carnet, nombre_oficial');
+  const padron = await traerPadron();
+  // Un padrón vacío casi siempre es un problema de permisos: no se toma como descarga válida
+  if (!padron.length) throw new Error('el servidor devolvió el padrón vacío (revisar permisos con Dev 2)');
   const lista = padron.map(e => ({
     carnet: String(e.carnet),
     nombre: e.nombre_oficial ?? '',
