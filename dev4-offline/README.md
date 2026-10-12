@@ -15,7 +15,8 @@ npm run build && npm run preview   # versión instalable (PWA): http://localhost
 
 | Ruta | Para quién | Qué hace |
 |---|---|---|
-| `#/` | Staff en la puerta | Configura operador, puerta y día; descarga el padrón; muestra los ingresos y cuántos faltan por enviar; permite probar un QR pegando su texto. |
+| `#/` | Staff en la puerta | Escáner con cámara y semáforo (Dev 3). Muestra conexión, día, puerta e ingresos sin enviar. |
+| `#/ajustes` | Staff en la puerta | Configura operador, puerta y día; descarga el padrón; muestra los ingresos y cuántos faltan por enviar; permite probar un QR pegando su texto. |
 | `#/portal?boleta=B-10232` | Estudiante en zona amarilla | Confirma qué carné corresponde a su boleta. Llama a `resolver_excepcion_estudiante`. Este es el enlace que va en el correo de Dev 5. |
 
 ## Función para la pantalla de escaneo (Dev 3)
@@ -29,7 +30,7 @@ const r = await procesarEscaneo(textoDelQr, 1, '3');   // o se indican a mano
 //   | { ok: false, motivo: 'qr_invalido' | 'qr_vencido' | 'no_encontrado' | 'ya_ingresado', carnet?, nombre? }
 ```
 
-No necesita internet. La sincronización arranca sola dentro de la app (`iniciarSincronizacion`).
+No necesita internet. La sincronización y la actualización del padrón corren solas en las pantallas del staff (`useMantenimiento`).
 
 ## Cómo funciona
 

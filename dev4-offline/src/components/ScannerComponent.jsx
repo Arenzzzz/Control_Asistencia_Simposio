@@ -1,12 +1,20 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 
 export default function ScannerComponent({ onScanResult, isProcessing }) {
   const scannerRegionId = "qr-reader";
   const scannerRef = useRef(null);
+  // Se guardan en refs para que la cámara se inicie una sola vez y no se reinicie en cada escaneo
+  const onScanRef = useRef(onScanResult);
+  const ocupadoRef = useRef(isProcessing);
+  useEffect(() => { onScanRef.current = onScanResult; }, [onScanResult]);
+  useEffect(() => { ocupadoRef.current = isProcessing; }, [isProcessing]);
 
   useEffect(() => {
-    const html5QrCode = new Html5Qrcode(scannerRegionId);
+    const html5QrCode = new Html5Qrcode(scannerRegionId, {
+      formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ], // Desactiva la búsqueda de códigos de barras
+      verbose: false
+    });
     scannerRef.current = html5QrCode;
 
     const config = {
@@ -23,26 +31,29 @@ export default function ScannerComponent({ onScanResult, isProcessing }) {
       },
       config,
       (decodedText) => {
-        if (!isProcessing) {
-          onScanResult(decodedText);
+        if (!ocupadoRef.current) {
+          ocupadoRef.current = true; // evita dos lecturas del mismo QR en el mismo instante
+          onScanRef.current(decodedText);
         }
       },
-      (errorMessage) => {} // Ignorar errores de no-detección frame a frame
+      () => {} // Ignorar errores de no-detección frame a frame
     ).catch((err) => {
       console.error("Error al iniciar la cámara.", err);
     });
 
     return () => {
-      if (html5QrCode.isScanning) {
-        html5QrCode.stop().catch(console.error);
-      }
+      if (detenido) return;
+      detenido = true;
+      inicio.then(() => {
+        if (html5QrCode.isScanning) return html5QrCode.stop();
+      }).catch(console.error);
     };
-  }, [isProcessing, onScanResult]);
+  }, []);
 
   // En Vite usamos style={} para algunos estilos complejos o dependemos del CSS de Tailwind
   return (
     <div style={{ position: 'relative', width: '100%', height: '100vh', backgroundColor: 'black', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-      <div id={scannerRegionId} style={{ width: '100%', maxWidth: '400px', height: '100%', objectFit: 'cover' }}></div>
+      <div id={scannerRegionId} style={{ width: '100%', maxWidth: '400px' }}></div>
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ width: '250px', height: '250px', border: '4px solid rgba(255,255,255,0.5)', borderRadius: '16px', position: 'relative', boxShadow: '0 0 0 1000px rgba(0,0,0,0.5)' }}>
           {/* Línea de escaneo simulada con CSS en index.css */}

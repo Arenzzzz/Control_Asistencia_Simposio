@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, borrarDatosLocales, protegerAlmacenamiento } from '../db';
 import { leerAjustes, guardarAjustes } from '../config';
-import { descargarPadron, actualizarPadronSiHaceFalta } from '../sync/padron';
+import { descargarPadron } from '../sync/padron';
 import { sincronizarCola } from '../sync/sync';
 import { procesarEscaneo } from '../qr/escanear';
 import { TOKEN_VALIDO } from '../qr/tokensPrueba';
@@ -29,14 +29,11 @@ export default function Puerta() {
   const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [protegido, setProtegido] = useState(null);
 
-  // Al abrir: protege la base local y mantiene el padrón al día (al reconectar y cada 10 min)
+  // El padrón se actualiza en segundo plano (useMantenimiento); aquí solo se refresca la fecha mostrada
   useEffect(() => {
     protegerAlmacenamiento().then(setProtegido);
-    const actualizar = () => actualizarPadronSiHaceFalta().then(r => { if (r) setAjustes(leerAjustes()); });
-    actualizar();
-    window.addEventListener('online', actualizar);
-    const timer = setInterval(actualizar, 60000);
-    return () => { window.removeEventListener('online', actualizar); clearInterval(timer); };
+    const timer = setInterval(() => setAjustes(leerAjustes()), 15000);
+    return () => clearInterval(timer);
   }, []);
 
   const totalPadron = useLiveQuery(() => db.estudiantes.count(), [], 0);
@@ -87,7 +84,8 @@ export default function Puerta() {
     <div className="pagina">
       <header className="encabezado">
         <div>
-          <h1>Control de puerta</h1>
+          <a href="#/" className="volver">← Volver al escáner</a>
+          <h1>Ajustes de puerta</h1>
           <p className="tenue">XIX Simposio de Ingeniería</p>
         </div>
         <span className={`estado-red ${enLinea ? 'ok' : 'mal'}`}>{enLinea ? 'En línea' : 'Sin conexión'}</span>
@@ -140,7 +138,7 @@ export default function Puerta() {
 
       <section className="bloque">
         <h2>Probar un escaneo</h2>
-        <p className="tenue">Pega el texto de un QR. La lectura con cámara la hace la pantalla de Dev 3, que usa esta misma función.</p>
+        <p className="tenue">Para pruebas sin cámara: pega el texto de un QR. El escáner usa esta misma función.</p>
         <form onSubmit={procesar} className="botones">
           <input id="token" className="ancho" value={token} onChange={e => setToken(e.target.value)} placeholder="eyJ…" autoComplete="off" />
           <button className="principal" type="submit">Procesar</button>

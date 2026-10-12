@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS public.checkins_asistencia (
     CONSTRAINT unique_checkin_dia UNIQUE (carnet, dia)
 );
 
+-- Tabla privada para tokens de acreditación QR (sin acceso público)
+CREATE TABLE IF NOT EXISTS public.credenciales_qr (
+    carnet VARCHAR(20) PRIMARY KEY REFERENCES public.padron_estudiantes(carnet),
+    token_qr VARCHAR(100) NOT NULL UNIQUE,
+    generado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    boleta_origen VARCHAR(50) REFERENCES public.tesoreria_pagos(boleta)
+);
+
+-- Habilitar RLS estricto (por defecto nadie sin Service Role puede leer/escribir)
+ALTER TABLE public.credenciales_qr ENABLE ROW LEVEL SECURITY;
 -- Índices de consulta rápida
 CREATE INDEX IF NOT EXISTS idx_checkins_carnet_dia ON public.checkins_asistencia(carnet, dia);
 CREATE INDEX IF NOT EXISTS idx_tesoreria_carnet_asignado ON public.tesoreria_pagos(carnet_asignado);
