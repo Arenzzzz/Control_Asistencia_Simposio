@@ -16,6 +16,7 @@ Uso:
   python enviar_correos.py --prueba tu-correo@ejemplo.com   # manda un ejemplo de cada tipo solo a ti
   python enviar_correos.py --verdes --limite 100            # QR, de 100 en 100
   python enviar_correos.py --amarillas                      # avisos del portal
+  python enviar_correos.py --verdes --amarillas --carnets 1517925,1052124   # solo a esos carnés (pruebas)
 """
 from __future__ import annotations
 
@@ -112,14 +113,15 @@ class Correo:
         self.smtp.quit()
 
 
-def enviar_verdes(conn, correo: Correo, limite: int) -> int:
+def enviar_verdes(conn, correo: Correo, limite: int, carnets: list[str] | None = None) -> int:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT c.carnet, p.nombre_oficial, p.correo_institucional, c.token_qr
             FROM credenciales_qr c JOIN padron_estudiantes p USING (carnet)
             WHERE c.enviado_en IS NULL
+              AND (%s::text[] IS NULL OR c.carnet = ANY(%s::text[]))
             ORDER BY c.carnet LIMIT %s;
-        """, (limite,))
+        """, (carnets, carnets, limite))
         filas = cur.fetchall()
     enviados = 0
     for carnet, nombre, para, token in filas:
@@ -136,25 +138,30 @@ def enviar_verdes(conn, correo: Correo, limite: int) -> int:
     return enviados
 
 
-def enviar_amarillas(conn, correo: Correo, limite: int) -> int:
+def enviar_amarillas(conn, correo: Correo, limite: int, carnets: list[str] | None = None) -> int:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT boleta, datos_extra->'candidatos'
             FROM tesoreria_pagos
             WHERE zona = 'AMARILLA' AND carnet_asignado IS NULL
               AND NOT (datos_extra ? 'aviso_portal_enviado')
+              AND (%s::text[] IS NULL OR EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(datos_extra->'candidatos') c
+                    WHERE c->>'carnet' = ANY(%s::text[])))
             ORDER BY boleta LIMIT %s;
-        """, (limite,))
+        """, (carnets, carnets, limite))
         boletas = cur.fetchall()
     enviados = 0
     for boleta, candidatos in boletas:
-        carnets = [c.get("carnet") for c in (candidatos or []) if isinstance(c, dict) and c.get("carnet")]
-        if not carnets:
+        destinatarios = [c.get("carnet") for c in (candidatos or []) if isinstance(c, dict) and c.get("carnet")]
+        if carnets is not None:  # en pruebas solo se escribe a los carnés indicados
+            destinatarios = [c for c in destinatarios if c in carnets]
+        if not destinatarios:
             print(f"  Boleta {boleta} sin candidatos: queda para la mesa de resolución")
             continue
         with conn.cursor() as cur:
             cur.execute("SELECT nombre_oficial, correo_institucional FROM padron_estudiantes WHERE carnet = ANY(%s);",
-                        (carnets,))
+                        (destinatarios,))
             destinos = cur.fetchall()
         try:
             for nombre, para in destinos:
@@ -162,6 +169,10 @@ def enviar_amarillas(conn, correo: Correo, limite: int) -> int:
                 enviados += 1
         except smtplib.SMTPException as e:
             print(f"  No se pudo avisar la boleta {boleta}: {e}")
+            continue
+        if carnets is not None:
+            # En pruebas no se marca la boleta: los demás candidatos aún no recibieron el aviso
+            print(f"  Boleta {boleta}: aviso de prueba enviado a {len(destinos)} candidato(s)")
             continue
         with conn.cursor() as cur:
             cur.execute("""UPDATE tesoreria_pagos
@@ -178,6 +189,7 @@ def main(argv=None):
     ap.add_argument("--amarillas", action="store_true", help="Enviar los avisos del portal pendientes")
     ap.add_argument("--limite", type=int, default=100, help="Máximo de envíos por corrida (por defecto 100)")
     ap.add_argument("--prueba", metavar="CORREO", help="Enviar solo un ejemplo de cada tipo a este correo")
+    ap.add_argument("--carnets", help="Enviar solo a estos carnés, separados por comas (para pruebas con el grupo)")
     a = ap.parse_args(argv)
 
     db_url = os.environ.get("DATABASE_URL")
@@ -186,6 +198,7 @@ def main(argv=None):
     if not (a.verdes or a.amarillas or a.prueba):
         sys.exit("Indica --prueba CORREO, --verdes o --amarillas")
 
+    carnets = [c.strip() for c in a.carnets.split(",") if c.strip()] if a.carnets else None
     correo = Correo()
     try:
         with psycopg.connect(db_url) as conn:
@@ -200,10 +213,10 @@ def main(argv=None):
                 print(f"Ejemplos enviados a {a.prueba}. No se marcó nada en la base.")
                 return
             if a.verdes:
-                n = enviar_verdes(conn, correo, a.limite)
+                n = enviar_verdes(conn, correo, a.limite, carnets)
                 print(f"QR enviados en esta corrida: {n}")
             if a.amarillas:
-                n = enviar_amarillas(conn, correo, a.limite)
+                n = enviar_amarillas(conn, correo, a.limite, carnets)
                 print(f"Avisos del portal enviados en esta corrida: {n}")
     finally:
         correo.cerrar()
