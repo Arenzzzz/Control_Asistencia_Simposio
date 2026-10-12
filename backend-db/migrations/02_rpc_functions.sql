@@ -191,50 +191,81 @@ SECURITY DEFINER
 AS $$
 DECLARE
     v_nombre VARCHAR;
-    v_boleta_valida BOOLEAN;
+    v_correo VARCHAR;
+    v_datos_extra JSONB;
+    v_boleta_existe BOOLEAN;
+    v_es_candidato_valido BOOLEAN;
+    v_token_qr VARCHAR;
 BEGIN
-    -- Validar carné en padrón oficial
-    SELECT nombre_oficial INTO v_nombre
+    -- 1. Verificar carné en padrón oficial
+    SELECT nombre_oficial, correo_institucional 
+    INTO v_nombre, v_correo
     FROM public.padron_estudiantes
     WHERE carnet = p_carnet;
 
     IF v_nombre IS NULL THEN
         RETURN jsonb_build_object(
             'status', 'ERROR',
-            'mensaje', 'El carné no figura en el padrón oficial.'
+            'mensaje', 'El carné no figura en el padrón oficial de la facultad.'
         );
     END IF;
 
-    -- Validar boleta en Zona Amarilla pendiente de asignar
-    SELECT EXISTS (
-        SELECT 1 FROM public.tesoreria_pagos 
-        WHERE boleta = p_boleta 
-          AND zona = 'AMARILLA' 
-          AND carnet_asignado IS NULL
-    ) INTO v_boleta_valida;
+    -- 2. Obtener boleta en Zona Amarilla sin conciliar
+    SELECT datos_extra 
+    INTO v_datos_extra
+    FROM public.tesoreria_pagos 
+    WHERE boleta = p_boleta 
+      AND zona = 'AMARILLA' 
+      AND carnet_asignado IS NULL;
 
-    IF NOT v_boleta_valida THEN
+    IF NOT FOUND THEN
         RETURN jsonb_build_object(
             'status', 'ERROR',
-            'mensaje', 'Boleta no encontrada, ya vinculada o en revisión presencial.'
+            'mensaje', 'La boleta no existe en revisión, ya fue vinculada o requiere atención en Mesa de Resolución.'
         );
     END IF;
 
-    -- Vincular y promover a CONCILIADO
+    -- 3. Validar si el carné ingresado está en la lista de candidatos que dejó el pipeline
+    -- Si el pipeline guardó un arreglo "candidatos", el carné DEBE estar dentro
+    IF v_datos_extra ? 'candidatos' THEN
+        SELECT EXISTS (
+            SELECT 1 
+            FROM jsonb_array_elements(v_datos_extra->'candidatos') c 
+            WHERE c->>'carnet' = p_carnet
+        ) INTO v_es_candidato_valido;
+        
+        IF NOT v_es_candidato_valido THEN
+            RETURN jsonb_build_object(
+                'status', 'ERROR',
+                'mensaje', 'El carné no coincide con los candidatos registrados para este pago. Acuda a la Mesa de Resolución el día del evento.'
+            );
+        END IF;
+    END IF;
+
+    -- 4. Construir payload o token para el QR
+    v_token_qr := 'SIMP26-' || p_carnet;
+
+    -- 5. Promover a Zona VERDE y CONCILIADO
     UPDATE public.tesoreria_pagos
     SET carnet_asignado = p_carnet,
+        zona = 'VERDE',
         estado = 'CONCILIADO',
-        datos_extra = datos_extra || jsonb_build_object(
-            'resuelto_en_portal', true, 
-            'fecha_resolucion', NOW()
+        datos_extra = v_datos_extra || jsonb_build_object(
+            'resuelto_en_portal', true,
+            'zona_origen', 'AMARILLA',
+            'fecha_resolucion', NOW(),
+            'qr_habilitado', true
         )
     WHERE boleta = p_boleta;
 
+    -- 6. Retornar datos al portal web para renderizar el QR en pantalla
     RETURN jsonb_build_object(
         'status', 'OK',
-        'mensaje', 'Identidad confirmada exitosamente.',
+        'mensaje', 'Identidad confirmada exitosamente. Tu acceso ha sido habilitado.',
+        'carnet', p_carnet,
         'nombre', v_nombre,
-        'carnet', p_carnet
+        'correo', v_correo,
+        'qr_data', v_token_qr
     );
 END;
 $$;
