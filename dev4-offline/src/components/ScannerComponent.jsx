@@ -10,7 +10,7 @@ export default function ScannerComponent({ onScanResult, isProcessing }) {
     scannerRef.current = html5QrCode;
 
     const config = {
-      fps: 30, // Escaneo casi instantáneo
+      fps: 10, // Escaneo estable
       qrbox: { width: 250, height: 250 },
       aspectRatio: 1.0,
       formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ] // Desactiva la búsqueda de códigos de barras
@@ -18,8 +18,8 @@ export default function ScannerComponent({ onScanResult, isProcessing }) {
 
     html5QrCode.start(
       { 
-        facingMode: "environment",
-        advanced: [{ focusMode: "continuous" }] // Fuerza el hardware del celular a enfocar rápido
+        facingMode: "environment" 
+        // ¡Línea de focusMode eliminada para máxima estabilidad!
       },
       config,
       (decodedText) => {
