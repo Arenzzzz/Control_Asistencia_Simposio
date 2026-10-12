@@ -1,7 +1,12 @@
-"""CLI del Dev 1: clasifica pagos conectándose directamente a Supabase.
+"""CLI del Dev 1: clasifica pagos y firma los QR conectándose a Supabase.
 
 Uso:
-  python correr_pipeline.py --tarifa 50 --db
+  export DATABASE_URL="postgresql://..."      # Supabase → Connect → Session pooler
+  python correr_pipeline.py --tarifa 50 --vence 2026-10-30 --db
+  python correr_pipeline.py --vence 2026-10-30 --solo-credenciales
+
+--vence es el último día del simposio: los QR valen hasta las 23:59 de ese día
+(hora de Guatemala). La llave privada se lee de private_key.pem (no se sube al repo).
 """
 from __future__ import annotations
 import argparse
@@ -9,10 +14,22 @@ import json
 import os
 import sys
 from collections import Counter
+from datetime import datetime, timedelta, timezone
+
 import psycopg
 
 from Clasificador import Config, clasificar_lote
+from Firma_qr import sign_qr
 from matcher import Padron
+
+HORA_GT = timezone(timedelta(hours=-6))
+
+
+def fin_del_dia(fecha: str) -> int:
+    """'2026-10-30' -> epoch de 2026-10-30 23:59:59 en Guatemala."""
+    dia = datetime.strptime(fecha, "%Y-%m-%d").replace(tzinfo=HORA_GT)
+    return int((dia + timedelta(days=1, seconds=-1)).timestamp())
+
 
 def leer_padron_db(conn_url: str) -> list[dict]:
     with psycopg.connect(conn_url) as conn:
@@ -20,56 +37,100 @@ def leer_padron_db(conn_url: str) -> list[dict]:
             cur.execute("SELECT carnet, nombre_oficial FROM padron_estudiantes;")
             return [{"carnet": str(row[0]), "nombre": row[1]} for row in cur.fetchall()]
 
+
 def leer_pagos_db(conn_url: str) -> list[dict]:
     with psycopg.connect(conn_url) as conn:
         with conn.cursor() as cur:
-            # Se ajusta la consulta para capturar 'pendiente' o valores vacíos
-            cur.execute("SELECT boleta, nombre_digitado, monto FROM tesoreria_pagos WHERE zona = 'pendiente' OR zona IS NULL;")
+            # La base guarda 'PENDIENTE' en mayúsculas
+            cur.execute(
+                "SELECT boleta, nombre_digitado, monto FROM tesoreria_pagos "
+                "WHERE zona IS NULL OR upper(zona) = 'PENDIENTE';"
+            )
             return [{"boleta": row[0], "nombre": row[1], "monto": row[2]} for row in cur.fetchall()]
 
+
 def actualizar_db(filas: list[dict], conn_url: str) -> None:
-    # Se agrega "estado = %s" a la consulta SQL
     sql = """
-        UPDATE tesoreria_pagos 
-        SET carnet_asignado = %s, zona = %s, datos_extra = %s::jsonb, estado = %s 
+        UPDATE tesoreria_pagos
+        SET carnet_asignado = %s, zona = %s, datos_extra = %s::jsonb, estado = %s
         WHERE boleta = %s;
     """
     with psycopg.connect(conn_url) as conn:
         with conn.cursor() as cur:
-            # Se agrega 'PROCESADO' antes de f["boleta"] para que coincida con el nuevo %s
             datos = [(f["carnet_asignado"], f["zona"], f["datos_extra"], 'PROCESADO', f["boleta"]) for f in filas]
             cur.executemany(sql, datos)
         conn.commit()
+
+
+def generar_credenciales(conn_url: str, vence_epoch: int) -> int:
+    """Firma el QR de cada boleta VERDE que aún no tiene credencial.
+
+    Cubre las verdes del pipeline y las que se resolvieron después en el portal
+    o en la mesa. Se puede correr las veces que haga falta: no repite QR.
+    """
+    with psycopg.connect(conn_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (t.carnet_asignado) t.carnet_asignado, t.boleta
+                FROM tesoreria_pagos t
+                WHERE t.zona = 'VERDE' AND t.carnet_asignado IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM credenciales_qr c WHERE c.carnet = t.carnet_asignado)
+                ORDER BY t.carnet_asignado, t.boleta;
+            """)
+            pendientes = cur.fetchall()
+            for carnet, boleta in pendientes:
+                token = sign_qr(str(carnet), vence_epoch)
+                cur.execute(
+                    "INSERT INTO credenciales_qr (carnet, token_qr, boleta_origen) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (carnet) DO NOTHING;",
+                    (carnet, token, boleta),
+                )
+        conn.commit()
+    return len(pendientes)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tarifa", type=float, required=True)
-    ap.add_argument("--db", action="store_true", help="Actualizar Supabase")
+    ap.add_argument("--tarifa", type=float, help="Monto esperado de la boleta (ej. 50)")
+    ap.add_argument("--vence", required=True, help="Último día del simposio, AAAA-MM-DD")
+    ap.add_argument("--db", action="store_true", help="Guardar la clasificación en Supabase")
+    ap.add_argument("--solo-credenciales", action="store_true",
+                    help="No clasifica; solo firma QR para las VERDE nuevas (portal y mesa)")
     a = ap.parse_args(argv)
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        print("Error: Define la variable de entorno DATABASE_URL")
+        print("Error: define la variable de entorno DATABASE_URL")
         sys.exit(1)
+    vence = fin_del_dia(a.vence)
 
-    print("Descargando registros de Supabase...")
-    padron = Padron(leer_padron_db(db_url))
-    pagos = leer_pagos_db(db_url)
-    cfg = Config(tarifa=a.tarifa)
-    
-    print(f"Clasificando {len(pagos)} pagos pendientes...")
-    resultados = clasificar_lote(pagos, padron, cfg)
+    if not a.solo_credenciales:
+        if a.tarifa is None:
+            print("Error: falta --tarifa")
+            sys.exit(1)
+        print("Descargando registros de Supabase...")
+        padron = Padron(leer_padron_db(db_url))
+        pagos = leer_pagos_db(db_url)
+        print(f"Clasificando {len(pagos)} pagos pendientes...")
+        resultados = clasificar_lote(pagos, padron, Config(tarifa=a.tarifa))
+        print(dict(Counter(r.zona for r in resultados)), file=sys.stderr)
 
-    if a.db and resultados:
-        filas_update = [{
-            "boleta": r.boleta,
-            "carnet_asignado": r.carnet_asignado,
-            "zona": r.zona,
-            "datos_extra": json.dumps(r.datos_extra(), ensure_ascii=False)
-        } for r in resultados]
-        actualizar_db(filas_update, db_url)
-        print("Base de datos actualizada con éxito.")
+        if not a.db:
+            print("Prueba sin guardar (agrega --db para guardar).")
+            return
+        if resultados:
+            # Se usa la boleta tal como está en la base (el clasificador la normaliza)
+            actualizar_db([{
+                "boleta": p["boleta"],
+                "carnet_asignado": r.carnet_asignado,
+                "zona": r.zona,
+                "datos_extra": json.dumps(r.datos_extra(), ensure_ascii=False),
+            } for p, r in zip(pagos, resultados)], db_url)
+            print("Clasificación guardada.")
 
-    print(dict(Counter(r.zona for r in resultados)), file=sys.stderr)
+    nuevas = generar_credenciales(db_url, vence)
+    print(f"QR firmados: {nuevas} (válidos hasta {a.vence} 23:59, hora de Guatemala).")
+
 
 if __name__ == "__main__":
     main()
