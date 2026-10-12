@@ -290,29 +290,54 @@ DECLARE
     v_nombre VARCHAR;
     v_tickets_disponibles INT;
     v_ya_ingreso BOOLEAN;
+    v_token_qr VARCHAR;
 BEGIN
+    -- 1. Validar que el carné exista en el padrón
     SELECT nombre_oficial INTO v_nombre 
-    FROM public.padron_estudiantes WHERE carnet = p_carnet;
+    FROM public.padron_estudiantes 
+    WHERE carnet = p_carnet;
 
     IF v_nombre IS NULL THEN
-        RETURN jsonb_build_object('status', 'ERROR', 'mensaje', 'Carné no encontrado en padrón.');
+        RETURN jsonb_build_object(
+            'status', 'ERROR', 
+            'mensaje', 'Carné no encontrado en el padrón oficial.'
+        );
     END IF;
 
+    -- 2. Validar que no haya ingresado previamente en el día solicitado
     SELECT EXISTS (
-        SELECT 1 FROM public.checkins_asistencia WHERE carnet = p_carnet AND dia = p_dia
+        SELECT 1 FROM public.checkins_asistencia 
+        WHERE carnet = p_carnet AND dia = p_dia
     ) INTO v_ya_ingreso;
 
     IF v_ya_ingreso THEN
-        RETURN jsonb_build_object('status', 'ALERTA', 'mensaje', 'El estudiante ya tiene asistencia registrada para este día.');
+        RETURN jsonb_build_object(
+            'status', 'ALERTA', 
+            'mensaje', 'El estudiante ya tiene asistencia registrada para este día.'
+        );
     END IF;
 
+    -- 3. Bloquear lote de inventario diario (FOR UPDATE)
     SELECT (tickets_totales - tickets_entregados) INTO v_tickets_disponibles
-    FROM public.inventario_tickets WHERE dia = p_dia FOR UPDATE;
+    FROM public.inventario_tickets 
+    WHERE dia = p_dia 
+    FOR UPDATE;
+
+    IF v_tickets_disponibles IS NULL THEN
+        RETURN jsonb_build_object(
+            'status', 'ERROR',
+            'mensaje', 'El día operativo especificado no está configurado.'
+        );
+    END IF;
 
     IF v_tickets_disponibles <= 0 THEN
-        RETURN jsonb_build_object('status', 'ERROR', 'mensaje', 'Inventario de tickets agotado.');
+        RETURN jsonb_build_object(
+            'status', 'ERROR', 
+            'mensaje', 'Inventario de tickets agotado para esta jornada.'
+        );
     END IF;
 
+    -- 4. Registrar check-in presencial del día en curso y descontar ticket
     INSERT INTO public.checkins_asistencia (carnet, dia, puerta, staff_id)
     VALUES (p_carnet, p_dia, 'Mesa Resolucion', p_operador);
 
@@ -320,21 +345,37 @@ BEGIN
     SET tickets_entregados = tickets_entregados + 1
     WHERE dia = p_dia;
 
+    -- 5. Generar token y registrar en la tabla privada credenciales_qr
+    v_token_qr := 'SIMP26-' || p_carnet;
+
+    INSERT INTO public.credenciales_qr (carnet, token_qr, boleta_origen)
+    VALUES (p_carnet, v_token_qr, p_boleta)
+    ON CONFLICT (carnet) DO UPDATE 
+    SET token_qr = EXCLUDED.token_qr,
+        boleta_origen = COALESCE(EXCLUDED.boleta_origen, credenciales_qr.boleta_origen);
+
+    -- 6. Promover boleta a VERDE / CONCILIADO para que Dev 5 despache el correo
     IF p_boleta IS NOT NULL THEN
         UPDATE public.tesoreria_pagos
-        SET estado = 'RESUELTO_MANUAL',
+        SET zona = 'VERDE',
+            estado = 'CONCILIADO',
             carnet_asignado = p_carnet,
-            datos_extra = datos_extra || jsonb_build_object(
+            datos_extra = COALESCE(datos_extra, '{}'::jsonb) || jsonb_build_object(
                 'justificacion', p_justificacion, 
                 'operador', p_operador,
-                'fecha_resolucion_manual', NOW()
+                'fecha_resolucion_manual', NOW(),
+                'resuelto_en_mesa', true,
+                'qr_habilitado', true
             )
         WHERE boleta = p_boleta;
     END IF;
 
     RETURN jsonb_build_object(
         'status', 'OK',
-        'mensaje', 'Ingreso manual y entrega de ticket autorizada para ' || v_nombre
+        'mensaje', 'Ingreso manual autorizado y ticket físico entregado a ' || v_nombre || '. Credencial QR habilitada para el Día 2.',
+        'carnet', p_carnet,
+        'nombre', v_nombre,
+        'qr_data', v_token_qr
     );
 END;
 $$;
