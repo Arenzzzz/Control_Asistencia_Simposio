@@ -68,6 +68,9 @@ class Candidate:
 
 
 _BIG = 99  # distancia "infinita" para tokens sin pareja
+# Un nombre de más en la boleta (p. ej. el segundo nombre que el padrón no trae)
+# cuesta 1, como cualquier otra edición: 'Anthony Rafael Domínguez' vs 'Anthony Domínguez' da k = 1.
+SOBRANTE_PAGO = 1
 
 
 def score_pair(pay_tokens: list[str], off_tokens: list[str]) -> tuple[int, int]:
@@ -84,10 +87,10 @@ def score_pair(pay_tokens: list[str], off_tokens: list[str]) -> tuple[int, int]:
             cov = sum(1 for d in ds if d <= 1)
             if best_k is None or (k, -cov) < (best_k, -best_cov):
                 best_k, best_cov = k, cov
-    else:  # más tokens en el pago que en el oficial: los sobrantes cuestan _BIG
+    else:  # más tokens en el pago que en el oficial: cada sobrante cuesta SOBRANTE_PAGO
         for rows in permutations(range(n), m):
             ds = [dist[r][j] for j, r in enumerate(rows)]
-            k = sum(ds) + _BIG * (n - m)
+            k = sum(ds) + SOBRANTE_PAGO * (n - m)
             cov = sum(1 for d in ds if d <= 1)
             if best_k is None or (k, -cov) < (best_k, -best_cov):
                 best_k, best_cov = k, cov

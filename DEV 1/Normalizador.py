@@ -9,6 +9,8 @@ import unicodedata
 
 _NON_ALNUM = re.compile(r"[^A-Z0-9 ]+")
 _SPACES = re.compile(r"\s+")
+# Excel exporta los saltos de línea como "_x000D_"; se quitan antes de normalizar
+_EXCEL_CR = re.compile(r"_x000[dDaA]_")
 
 STOPWORDS = frozenset({"DE", "DEL", "LA", "LAS", "LOS", "Y"})
 
@@ -22,7 +24,7 @@ def normalize_name(raw: str) -> str:
     """'  Pérez-Gómez, Juan  Carlos. ' -> 'PEREZ GOMEZ JUAN CARLOS'"""
     if raw is None:
         return ""
-    text = strip_accents(str(raw)).upper()
+    text = strip_accents(_EXCEL_CR.sub(" ", str(raw))).upper()
     text = _NON_ALNUM.sub(" ", text)
     return _SPACES.sub(" ", text).strip()
 

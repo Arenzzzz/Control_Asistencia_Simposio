@@ -37,6 +37,13 @@ def test_verde_nombre_incompleto():
     assert zona([pago("2", "ana lucia herrera")]) == [VERDE]
     assert zona([pago("3", "Maria Angeles Castillo")]) == [VERDE]
 
+def test_verde_con_nombre_de_mas_en_la_boleta():
+    # la boleta trae el segundo nombre y el padrón no
+    padron = Padron([{"carnet": "1052124", "nombre": "Anthony Dominguez Arriola"}])
+    r = clasificar_lote([pago("10", "ANTHONY RAFAEL DOMINGUEZ ARRIOLA")], padron, CFG)[0]
+    assert (r.zona, r.carnet_asignado) == (VERDE, "1052124")
+    assert zona([pago("11", "Ana Lucia Herrera Cruz_x000D_")]) == [VERDE]
+
 def test_verde_con_typo_y_transposicion():
     assert zona([pago("4", "Luis Moralse")]) == [VERDE]
 
