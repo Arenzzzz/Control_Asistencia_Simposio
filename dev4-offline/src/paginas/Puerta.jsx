@@ -84,7 +84,10 @@ export default function Puerta() {
     <div className="pagina">
       <header className="encabezado">
         <div>
-          <a href="#/" className="volver">← Volver al escáner</a>
+          <div className="botones" style={{ marginTop: 0 }}>
+            <a href="#/" className="volver">← Volver al escáner</a>
+            <a href="#/mesa" className="volver">Mesa de resolución →</a>
+          </div>
           <h1>Ajustes de puerta</h1>
           <p className="tenue">XIX Simposio de Ingeniería</p>
         </div>

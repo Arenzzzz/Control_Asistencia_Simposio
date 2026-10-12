@@ -48,7 +48,7 @@ export default function Portal() {
             Confirma tu carné para generar tu entrada.</p>
           <form onSubmit={enviar} className="formulario">
             <label>Número de boleta
-              <input id="boleta" value={boleta} onChange={e => setBoleta(e.target.value)} placeholder="Ej. B-10232" autoComplete="off" />
+              <input id="boleta" value={boleta} onChange={e => setBoleta(e.target.value)} placeholder="Como aparece en tu comprobante" autoComplete="off" />
             </label>
             <label>Carné
               <input id="carnet" value={carnet} onChange={e => setCarnet(e.target.value)} placeholder="Ej. 2026-0002" autoComplete="off" inputMode="text" />
