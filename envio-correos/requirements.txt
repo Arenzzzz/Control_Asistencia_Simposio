@@ -1,0 +1,4 @@
+psycopg[binary]>=3.2
+segno>=1.6
+PyJWT>=2.8
+cryptography>=42

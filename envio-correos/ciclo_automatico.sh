@@ -1,9 +1,14 @@
 #!/bin/bash
 # Un ciclo del envío automático: firma los QR de las boletas que se volvieron VERDE
-# (pipeline, portal o mesa) y envía los correos pendientes. Lo corre launchd cada 5 min.
+# (pipeline, portal o mesa) y envía los correos pendientes.
+# Lo corre GitHub cada 5 minutos (.github/workflows/envio-automatico.yml) o, como respaldo, launchd en una Mac.
 set -u
-source "$HOME/.simposio.env"
+# En la Mac los datos vienen de ~/.simposio.env; en GitHub vienen de los secretos del repositorio.
+if [ -f "$HOME/.simposio.env" ]; then
+  source "$HOME/.simposio.env"
+fi
 PY="$HOME/.venv-simposio/bin/python3"
+[ -x "$PY" ] || PY="python3"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 RAIZ="$(dirname "$DIR")"
 

@@ -1,0 +1,62 @@
+# Envío automático de los QR desde GitHub, sin depender de ninguna computadora.
+# Cada 5 minutos firma los QR de las boletas que se volvieron VERDE (pipeline, portal o mesa)
+# y envía los correos pendientes. También se puede correr a mano: Actions → Envío automático de QR → Run workflow.
+#
+# Secretos (Settings → Secrets and variables → Actions → Secrets):
+#   DATABASE_URL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, PRIVATE_KEY_PEM
+# Variables (misma pantalla → Variables):
+#   CARNETS_PRUEBA  carnés separados por comas para las pruebas (solo a ellos se les envía)
+#   ENVIO_REAL      "si" para enviar a todos (y borrar CARNETS_PRUEBA)
+#   VENCE           último día del simposio (por defecto 2026-10-16)
+#   LIMITE          correos por ciclo (por defecto 40)
+# Si no hay CARNETS_PRUEBA ni ENVIO_REAL=si, el ciclo no corre: así nunca se envía a todos por error.
+
+name: Envío automático de QR
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: envio-automatico
+  cancel-in-progress: false
+
+jobs:
+  ciclo:
+    if: vars.CARNETS_PRUEBA != '' || vars.ENVIO_REAL == 'si'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+      VENCE: ${{ vars.VENCE || '2026-10-16' }}
+      LIMITE: ${{ vars.LIMITE || '40' }}
+      CARNETS_PRUEBA: ${{ vars.ENVIO_REAL != 'si' && vars.CARNETS_PRUEBA || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: envio-correos/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r envio-correos/requirements.txt
+
+      - name: Colocar la llave privada
+        env:
+          PRIVATE_KEY_PEM: ${{ secrets.PRIVATE_KEY_PEM }}
+        run: printf '%s\n' "$PRIVATE_KEY_PEM" > "DEV 1/private_key.pem"
+
+      - name: Firmar y enviar
+        run: bash envio-correos/ciclo_automatico.sh
+
+      - name: Borrar la llave privada
+        if: always()
+        run: rm -f "DEV 1/private_key.pem"
