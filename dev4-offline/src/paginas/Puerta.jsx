@@ -7,6 +7,7 @@ import { sincronizarCola } from '../sync/sync';
 import { procesarEscaneo } from '../qr/escanear';
 import { TOKEN_VALIDO } from '../qr/tokensPrueba';
 import { useEnLinea } from '../useEnLinea';
+import Encabezado from '../components/Encabezado';
 
 const RESULTADOS = {
   ok: ['Puede ingresar', 'ok'],
@@ -81,18 +82,14 @@ export default function Puerta() {
   const sinStaff = !ajustes.staffId.trim();
 
   return (
+    <>
+    <Encabezado activa="ajustes" enLinea={enLinea} destacado={1}
+      detalle={['Ajustes de puerta', ajustes.staffId || 'Sin operador', `Puerta ${ajustes.puerta}`, `Día ${ajustes.dia}`]} />
     <div className="pagina">
-      <header className="encabezado">
-        <div>
-          <div className="botones" style={{ marginTop: 0 }}>
-            <a href="#/" className="volver">← Volver al escáner</a>
-            <a href="#/mesa" className="volver">Mesa de resolución →</a>
-          </div>
-          <h1>Ajustes de puerta</h1>
-          <p className="tenue">XIX Simposio de Ingeniería</p>
-        </div>
-        <span className={`estado-red ${enLinea ? 'ok' : 'mal'}`}>{enLinea ? 'En línea' : 'Sin conexión'}</span>
-      </header>
+      <div className="titulo-pagina">
+        <h1>Ajustes de puerta</h1>
+        <p>Configuración de este celular, padrón y herramientas de prueba.</p>
+      </div>
 
       <section className="resumen">
         <div><b>{totalPadron}</b><span>Estudiantes en el celular</span></div>
@@ -183,5 +180,6 @@ export default function Puerta() {
         ) : <button onClick={() => setConfirmarBorrado(true)}>Borrar datos</button>}
       </section>
     </div>
+    </>
   );
 }

@@ -51,18 +51,15 @@ export default function ScannerComponent({ onScanResult, isProcessing }) {
     };
   }, []);
 
-  // En Vite usamos style={} para algunos estilos complejos o dependemos del CSS de Tailwind
+  // Estilos en index.css (.lector): el visor ocupa la tarjeta de la cámara del diseño de Stitch
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100vh', backgroundColor: 'black', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-      <div id={scannerRegionId} style={{ width: '100%', maxWidth: '400px' }}></div>
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: '250px', height: '250px', border: '4px solid rgba(255,255,255,0.5)', borderRadius: '16px', position: 'relative', boxShadow: '0 0 0 1000px rgba(0,0,0,0.5)' }}>
-          {/* Línea de escaneo simulada con CSS en index.css */}
-          <div className="scan-line" style={{ width: '100%', height: '4px', backgroundColor: '#4ade80', position: 'absolute', top: 0 }}></div>
+    <div className="lector">
+      <div id={scannerRegionId} className="lector__video"></div>
+      <div className="lector__capa">
+        <div className="lector__marco">
+          <div className="scan-line"></div>
         </div>
-        <p style={{ marginTop: '2rem', color: 'white', fontWeight: 'bold', fontSize: '1.125rem', backgroundColor: 'rgba(0,0,0,0.5)', padding: '0.5rem 1rem', borderRadius: '0.5rem', backdropFilter: 'blur(4px)' }}>
-          Apunta el código QR del carné
-        </p>
+        <p className="lector__ayuda">Apunta el código QR del carné</p>
       </div>
     </div>
   );

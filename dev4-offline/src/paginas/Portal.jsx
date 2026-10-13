@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { resolverExcepcion } from '../sync/portal';
 import { enviarAhora } from '../sync/envio';
 import { useEnLinea } from '../useEnLinea';
+import Encabezado from '../components/Encabezado';
 
 // La boleta puede venir en el enlace del correo: #/portal?boleta=B-10232
 function boletaDelEnlace() {
@@ -30,13 +31,13 @@ export default function Portal() {
   }
 
   return (
+    <>
+    <Encabezado detalle={['Confirmación de inscripción']} />
     <div className="pagina estrecha">
-      <header className="encabezado">
-        <div>
-          <h1>Confirma tu entrada</h1>
-          <p className="tenue">XIX Simposio de Ingeniería</p>
-        </div>
-      </header>
+      <div className="titulo-pagina">
+        <h1>Confirma tu entrada</h1>
+        <p>XIX Simposio de Ingeniería · jueves 15 y viernes 16 de octubre</p>
+      </div>
 
       {respuesta?.ok ? (
         <section className="bloque">
@@ -54,7 +55,7 @@ export default function Portal() {
               <input id="boleta" value={boleta} onChange={e => setBoleta(e.target.value)} placeholder="Como aparece en tu comprobante" autoComplete="off" />
             </label>
             <label>Carné
-              <input id="carnet" value={carnet} onChange={e => setCarnet(e.target.value)} placeholder="Ej. 2026-0002" autoComplete="off" inputMode="text" />
+              <input id="carnet" value={carnet} onChange={e => setCarnet(e.target.value)} placeholder="Ej. 1517925" autoComplete="off" inputMode="text" />
             </label>
             <button className="principal" type="submit" disabled={enviando || !enLinea}>
               {enviando ? 'Confirmando…' : 'Confirmar'}
@@ -66,5 +67,6 @@ export default function Portal() {
         </section>
       )}
     </div>
+    </>
   );
 }

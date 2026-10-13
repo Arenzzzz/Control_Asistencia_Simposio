@@ -4,8 +4,12 @@ import { supabase } from './supabase';
 // Devuelven { ok, mensaje, ...datos }
 async function llamar(funcion, args) {
   if (!navigator.onLine) return { ok: false, mensaje: 'La mesa necesita internet.' };
-  const { data, error } = await supabase.rpc(funcion, args);
-  if (error) return { ok: false, mensaje: 'No se pudo contactar al servidor: ' + error.message };
+  // Límite de 20 s: si el servidor no responde, se muestra un error en lugar de quedarse buscando
+  const { data, error } = await supabase.rpc(funcion, args).abortSignal(AbortSignal.timeout(20000));
+  if (error) {
+    const lento = /abort|timeout/i.test(`${error.name} ${error.message}`);
+    return { ok: false, mensaje: lento ? 'El servidor tardó demasiado en responder. Intenta de nuevo.' : 'No se pudo contactar al servidor: ' + error.message };
+  }
   return { ...data, ok: data?.status === 'OK', mensaje: data?.mensaje ?? '' };
 }
 

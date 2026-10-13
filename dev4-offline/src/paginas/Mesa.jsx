@@ -3,6 +3,7 @@ import { leerAjustes } from '../config';
 import { useEnLinea } from '../useEnLinea';
 import { buscar, vincularBoleta, registrarIngreso, reenviarQr } from '../sync/mesa';
 import { enviarAhora } from '../sync/envio';
+import Encabezado from '../components/Encabezado';
 
 const ZONAS = { VERDE: 'ok', AMARILLA: 'aviso', ROJA: 'mal', PENDIENTE: 'aviso' };
 const hora = (iso) => new Date(iso).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' });
@@ -148,15 +149,14 @@ export default function Mesa() {
   const nada = res?.ok && !res.estudiantes.length && !res.boletas.length;
 
   return (
+    <>
+    <Encabezado activa="mesa" enLinea={enLinea} destacado={1}
+      detalle={['Mesa de resolución', operador.trim() || 'Sin operador', `Día ${dia}`]} />
     <div className="pagina">
-      <header className="encabezado">
-        <div>
-          <a href="#/ajustes" className="volver">← Ajustes</a>
-          <h1>Mesa de resolución</h1>
-          <p className="tenue">XIX Simposio de Ingeniería</p>
-        </div>
-        <span className={`estado-red ${enLinea ? 'ok' : 'mal'}`}>{enLinea ? 'En línea' : 'Sin conexión'}</span>
-      </header>
+      <div className="titulo-pagina">
+        <h1>Mesa de resolución</h1>
+        <p>Búsqueda y soporte por carné ilegible, QR perdido o boleta física.</p>
+      </div>
 
       <section className="bloque">
         <div className="campos">
@@ -187,5 +187,6 @@ export default function Mesa() {
       {res?.ok && res.boletas.length > 0 && <h2>Boletas sin dueño</h2>}
       {res?.ok && res.boletas.map(b => <TarjetaBoleta key={b.boleta} b={b} sesion={sesion} alCambiar={hacerBusqueda} />)}
     </div>
+    </>
   );
 }
