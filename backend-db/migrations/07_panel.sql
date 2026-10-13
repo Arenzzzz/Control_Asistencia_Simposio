@@ -56,6 +56,15 @@ BEGIN
                            FROM (SELECT dia, puerta, count(*) AS total
                                  FROM checkins_asistencia GROUP BY 1, 2) p)
         ),
+        -- Últimos 15 ingresos de todas las puertas
+        'recientes', (SELECT coalesce(jsonb_agg(r ORDER BY r->>'orden' DESC), '[]'::jsonb) FROM (
+                        SELECT jsonb_build_object(
+                            'orden', to_char(c.hora_checkin, 'YYYYMMDDHH24MISSUS'),
+                            'hora', to_char(c.hora_checkin AT TIME ZONE 'America/Guatemala', 'HH24:MI'),
+                            'carnet', c.carnet, 'nombre', p.nombre_oficial,
+                            'dia', c.dia, 'puerta', c.puerta, 'operador', c.staff_id) AS r
+                        FROM checkins_asistencia c LEFT JOIN padron_estudiantes p USING (carnet)
+                        ORDER BY c.hora_checkin DESC LIMIT 15) x),
         'tickets', (SELECT coalesce(jsonb_agg(jsonb_build_object(
                         'dia', dia, 'totales', tickets_totales, 'entregados', tickets_entregados) ORDER BY dia), '[]'::jsonb)
                     FROM inventario_tickets)

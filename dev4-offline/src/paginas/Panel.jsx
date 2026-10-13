@@ -97,6 +97,22 @@ function IngresosPorPuerta({ datos }) {
   );
 }
 
+// Lista de los últimos ingresos que ya llegaron al servidor (de cualquier puerta)
+function UltimosIngresos({ filas }) {
+  if (!filas.length) return <p className="vacio">Todavía no hay ingresos registrados.</p>;
+  return (
+    <div className="tabla"><table>
+      <thead><tr><th>Hora</th><th>Nombre</th><th>Carné</th><th>Día</th><th>Puerta</th><th>Operador</th></tr></thead>
+      <tbody>{filas.map((f, i) => (
+        <tr key={`${f.carnet}-${f.dia}-${i}`}>
+          <td>{f.hora}</td><td>{f.nombre ?? '—'}</td><td>{f.carnet}</td><td>{f.dia}</td>
+          <td>{String(f.puerta).replace(/^Puerta\s*/i, '')}</td><td>{f.operador ?? '—'}</td>
+        </tr>))}
+      </tbody>
+    </table></div>
+  );
+}
+
 function Zonas({ b }) {
   const total = ZONAS.reduce((s, z) => s + (b[z.id] ?? 0), 0);
   if (!total) return <p className="vacio">Todavía no hay boletas cargadas.</p>;
@@ -223,6 +239,14 @@ export default function Panel() {
                 <div className="tarjeta-titulo"><h2>Ingresos por puerta · día {dia}</h2></div>
                 <IngresosPorPuerta datos={ing.por_puerta.filter(x => x.dia === dia)} />
                 <p className="tenue">Estudiantes distintos que han entrado: <b>{num(ing.unicos)}</b> de {num(verdes)} con pago validado.</p>
+              </section>
+
+              <section className="tarjeta panel-ancho">
+                <div className="tarjeta-titulo">
+                  <h2>Últimos ingresos</h2>
+                  <span className="tenue">Todas las puertas · se actualiza cada 30 s</span>
+                </div>
+                <UltimosIngresos filas={datos.recientes ?? []} />
               </section>
 
               <section className="tarjeta panel-ancho">
