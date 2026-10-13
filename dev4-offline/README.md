@@ -17,8 +17,10 @@ npm run build && npm run preview   # versión instalable (PWA): http://localhost
 |---|---|---|
 | `#/` | Staff en la puerta | Escáner con cámara y semáforo (Dev 3). Muestra conexión, día, puerta e ingresos sin enviar. |
 | `#/ajustes` | Staff en la puerta | Configura operador, puerta y día; descarga el padrón; muestra los ingresos y cuántos faltan por enviar; permite probar un QR pegando su texto. |
+| `#/panel` | Coordinación | Estadísticas en vivo (pagos, QR, ingresos por hora y puerta, zonas) y descarga de registros en CSV. Usa la clave de la mesa y las funciones de `07_panel.sql`. |
 | `#/mesa` | Mesa de resolución | Busca por carné, nombre o boleta; asigna boletas sin dueño, registra ingresos manuales y reenvía QR. Necesita internet y la clave de la mesa. |
 | `#/portal?boleta=B-10232` | Estudiante en zona amarilla | Confirma qué carné corresponde a su boleta. Llama a `resolver_excepcion_estudiante`. Este es el enlace que va en el correo de Dev 5. Al confirmar, pide el envío inmediato del QR. |
+| `#/panel` | Coordinación | Estadísticas en vivo (pagos, QR, ingresos por hora y puerta, zonas) y descarga de registros en CSV. Usa la clave de la mesa y las funciones de `07_panel.sql`. |
 | `#/mesa` | Mesa de resolución | Busca por carné, nombre o boleta; asigna boletas, registra ingresos, reenvía el QR y tiene el botón "Enviar QR pendientes ahora". |
 
 ## Función para la pantalla de escaneo (Dev 3)
