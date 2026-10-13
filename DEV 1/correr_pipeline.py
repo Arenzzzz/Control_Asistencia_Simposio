@@ -2,7 +2,7 @@
 
 Uso:
   export DATABASE_URL="postgresql://..."      # Supabase → Connect → Session pooler
-  python correr_pipeline.py --tarifa 50 --vence 2026-10-30 --db
+  python correr_pipeline.py --tarifa 300 --tarifa-docente 150 --vence 2026-10-16 --db
   python correr_pipeline.py --vence 2026-10-30 --solo-credenciales
 
 --vence es el último día del simposio: los QR valen hasta las 23:59 de ese día
@@ -18,9 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from Clasificador import Config, clasificar_lote
+from Clasificador import Config, clasificar_lote, separar_padron
 from Firma_qr import sign_qr
-from matcher import Padron
 
 HORA_GT = timezone(timedelta(hours=-6))
 
@@ -34,8 +33,13 @@ def fin_del_dia(fecha: str) -> int:
 def leer_padron_db(conn_url: str) -> list[dict]:
     with psycopg.connect(conn_url) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT carnet, nombre_oficial FROM padron_estudiantes;")
-            return [{"carnet": str(row[0]), "nombre": row[1]} for row in cur.fetchall()]
+            # La columna tipo (ESTUDIANTE / DOCENTE) la agrega 09_docentes.sql
+            cur.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'padron_estudiantes' AND column_name = 'tipo');")
+            con_tipo = cur.fetchone()[0]
+            cur.execute("SELECT carnet, nombre_oficial, " + ("tipo" if con_tipo else "'ESTUDIANTE'")
+                        + " FROM padron_estudiantes;")
+            return [{"carnet": str(row[0]), "nombre": row[1], "tipo": row[2]} for row in cur.fetchall()]
 
 
 def leer_pagos_db(conn_url: str) -> list[dict]:
@@ -91,7 +95,8 @@ def generar_credenciales(conn_url: str, vence_epoch: int) -> int:
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tarifa", type=float, help="Monto esperado de la boleta (ej. 50)")
+    ap.add_argument("--tarifa", type=float, help="Monto de la boleta de estudiantes (ej. 300)")
+    ap.add_argument("--tarifa-docente", type=float, help="Monto de la boleta de docentes (ej. 150)")
     ap.add_argument("--vence", required=True, help="Último día del simposio, AAAA-MM-DD")
     ap.add_argument("--db", action="store_true", help="Guardar la clasificación en Supabase")
     ap.add_argument("--solo-credenciales", action="store_true",
@@ -109,10 +114,11 @@ def main(argv=None):
             print("Error: falta --tarifa")
             sys.exit(1)
         print("Descargando registros de Supabase...")
-        padron = Padron(leer_padron_db(db_url))
+        padron = separar_padron(leer_padron_db(db_url))
+        print("Padrón: " + ", ".join(f"{len(p.people)} {t.lower()}s" for t, p in padron.items()))
         pagos = leer_pagos_db(db_url)
         print(f"Clasificando {len(pagos)} pagos pendientes...")
-        resultados = clasificar_lote(pagos, padron, Config(tarifa=a.tarifa))
+        resultados = clasificar_lote(pagos, padron, Config(tarifa=a.tarifa, tarifa_docente=a.tarifa_docente))
         print(dict(Counter(r.zona for r in resultados)), file=sys.stderr)
 
         if not a.db:

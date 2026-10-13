@@ -7,6 +7,10 @@ import '@fontsource/plus-jakarta-sans/latin-600.css'
 import '@fontsource/plus-jakarta-sans/latin-700.css'
 import './index.css'
 import App from './App.jsx'
+import { ajustarDiaPorFecha } from './config'
+
+// Antes de mostrar nada, el celular se pone en el día del simposio que toca
+ajustarDiaPorFecha()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -97,3 +97,38 @@ def test_precision_sintetica():
     erroneos = [r for r, e in verdes if r.carnet_asignado != e]
     precision_verde = 1 - len(erroneos) / max(1, len(verdes))
     assert precision_verde >= 0.95
+
+# ---- Docentes (Q150) y estudiantes (Q300) -----------------------------------
+from Clasificador import separar_padron
+
+PADRON_MIXTO = PADRON + [
+    {"carnet": "D001", "nombre": "Luis Fernando Morales Soto", "tipo": "DOCENTE"},   # homónimo de un estudiante
+    {"carnet": "D002", "nombre": "Roberto Carlos Méndez Arriola", "tipo": "DOCENTE"},
+]
+CFG_DOS = Config(tarifa=300.0, tarifa_docente=150.0)
+
+def zona_mixta(pagos):
+    return [(r.zona, r.carnet_asignado, r.motivo) for r in clasificar_lote(pagos, separar_padron(PADRON_MIXTO), CFG_DOS)]
+
+def test_docente_q150_verde():
+    assert zona_mixta([pago("D1", "Roberto Mendez Arriola", 150)])[0][:2] == (VERDE, "D002")
+
+def test_monto_decide_el_tipo_ante_homonimos():
+    # El mismo nombre existe como estudiante y como docente: el monto decide quién es
+    assert zona_mixta([pago("E1", "Luis Fernando Morales", 300)])[0][:2] == (VERDE, "202100005")
+    assert zona_mixta([pago("E2", "Luis Fernando Morales", 150)])[0][:2] == (VERDE, "D001")
+
+def test_estudiante_con_tarifa_docente_no_se_asigna():
+    # Un estudiante que paga Q150 no queda a su nombre: no hay docente con ese nombre
+    assert zona_mixta([pago("E3", "Ana Lucia Herrera", 150)])[0][0] == ROJA
+
+def test_monto_distinto_a_ambas_tarifas():
+    assert zona_mixta([pago("X1", "Roberto Mendez", 200)])[0][0] == ROJA
+
+def test_sin_tarifa_docente_q150_es_roja():
+    r = clasificar_lote([pago("X2", "Roberto Mendez Arriola", 150)], separar_padron(PADRON_MIXTO), Config(tarifa=300.0))
+    assert r[0].zona == ROJA
+
+def test_boleta_docente_sin_docentes_cargados():
+    r = clasificar_lote([pago("X3", "Roberto Mendez", 150)], separar_padron(PADRON), CFG_DOS)
+    assert (r[0].zona, r[0].motivo) == (ROJA, "sin_padron_docente")

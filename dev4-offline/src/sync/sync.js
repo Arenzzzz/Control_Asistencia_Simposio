@@ -1,5 +1,6 @@
 import { db } from '../db';
 import { supabase } from './supabase';
+import { leerAjustes } from '../config';
 
 const TAMANO_LOTE = 50;
 let enCurso = false; // evita dos sincronizaciones a la vez
@@ -9,11 +10,16 @@ const aPayload = ({ carnet, dia, puerta, timestamp, staff_id }) => ({
   carnet, dia, puerta: String(puerta), hora_checkin: timestamp, staff_id
 });
 
+// Usa puerta_sincronizar, que pide la clave de la puerta (08_seguridad.sql).
+// Si la base aún no tiene esa función, usa la anterior. Si la clave falla, los ingresos
+// se quedan guardados en el celular y se reintentan.
 async function enviar(lote) {
-  const { data, error } = await supabase.rpc('sincronizar_checkins_offline', {
-    p_checkins: lote.map(aPayload)
-  });
-  if (error) throw new Error(error.message);
+  const p_checkins = lote.map(aPayload);
+  let { data, error } = await supabase.rpc('puerta_sincronizar', { p_clave: leerAjustes().clavePuerta, p_checkins });
+  if (error && /could not find the function|PGRST202/i.test(error.message)) {
+    ({ data, error } = await supabase.rpc('sincronizar_checkins_offline', { p_checkins }));
+  }
+  if (error) throw new Error(/clave de puerta incorrecta/i.test(error.message) ? 'la clave de la puerta es incorrecta (revísala en Ajustes)' : error.message);
   if (data?.status !== 'OK') throw new Error('Respuesta inesperada: ' + JSON.stringify(data));
 
   const r = {

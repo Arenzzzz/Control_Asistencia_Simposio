@@ -15,25 +15,37 @@ async function paginar(nombre, consulta) {
   }
 }
 
-const traerTodo = (tabla, columnas) =>
-  paginar(tabla, (a, b) => supabase.from(tabla).select(columnas).range(a, b));
+// Las tablas ya no se leen directo: se usan funciones que piden la clave de la puerta (08_seguridad.sql).
+// Si la base todavía no tiene esas funciones, se usa la función anterior para no dejar la puerta sin padrón.
+const sinFuncion = (e) => /could not find the function|PGRST202|does not exist/i.test(e.message);
 
-// El padrón ya no se puede leer directo (protege los correos). Se usa la función
-// obtener_padron_movil, que solo entrega carné y nombre. Si aún no existe, se intenta la tabla.
-async function traerPadron() {
+async function traerPadron(clave) {
   try {
-    return await paginar('obtener_padron_movil', (a, b) => supabase.rpc('obtener_padron_movil').range(a, b));
+    return await paginar('puerta_padron', (a, b) => supabase.rpc('puerta_padron', { p_clave: clave }).range(a, b));
   } catch (e) {
-    console.warn('No se pudo usar obtener_padron_movil, se intenta la tabla:', e.message);
-    return traerTodo('padron_estudiantes', 'carnet, nombre_oficial');
+    if (!sinFuncion(e)) throw e;
+    return paginar('obtener_padron_movil', (a, b) => supabase.rpc('obtener_padron_movil').range(a, b));
+  }
+}
+
+async function traerIngresos(clave) {
+  try {
+    return await paginar('puerta_ingresos', (a, b) => supabase.rpc('puerta_ingresos', { p_clave: clave }).range(a, b));
+  } catch (e) {
+    if (!sinFuncion(e)) throw e;
+    return paginar('checkins_asistencia', (a, b) => supabase.from('checkins_asistencia').select('carnet, dia').range(a, b));
   }
 }
 
 // Descarga el padrón y los ingresos ya registrados, y los guarda en el celular.
 export async function descargarPadron() {
-  const padron = await traerPadron();
+  const clave = leerAjustes().clavePuerta;
+  const padron = await traerPadron(clave).catch(e => {
+    if (!/clave de puerta incorrecta/i.test(e.message)) throw e;
+    throw new Error(clave ? 'la clave de la puerta es incorrecta' : 'falta la clave de la puerta (escríbela en Ajustes)');
+  });
   // Un padrón vacío casi siempre es un problema de permisos: no se toma como descarga válida
-  if (!padron.length) throw new Error('el servidor devolvió el padrón vacío (revisar permisos con Dev 2)');
+  if (!padron.length) throw new Error('el servidor devolvió el padrón vacío');
   const lista = padron.map(e => ({
     carnet: String(e.carnet),
     nombre: e.nombre_oficial ?? '',
@@ -41,7 +53,7 @@ export async function descargarPadron() {
 
   let ingresos = [];
   try {
-    const ch = await traerTodo('checkins_asistencia', 'carnet, dia');
+    const ch = await traerIngresos(clave);
     ingresos = ch.map(c => ({ carnet: String(c.carnet), dia: Number(c.dia) }));
   } catch (e) {
     console.warn('No se pudieron leer los ingresos del servidor:', e.message);

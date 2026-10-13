@@ -111,6 +111,10 @@ export default function Puerta() {
               {['1', '2', '3', '4'].map(p => <option key={p} value={p}>Puerta {p}</option>)}
             </select>
           </label>
+          <label>Clave de la puerta
+            <input id="clave-puerta" type="password" value={ajustes.clavePuerta} placeholder="La da coordinación"
+              autoComplete="off" onChange={e => cambiar('clavePuerta', e.target.value.trim())} />
+          </label>
           <label>Día
             <select id="dia" value={ajustes.dia} onChange={e => cambiar('dia', Number(e.target.value))}>
               <option value={1}>Día 1</option>
@@ -119,6 +123,8 @@ export default function Puerta() {
           </label>
         </div>
         {sinStaff && <p className="tenue">Escribe el operador para que cada ingreso quede registrado con su nombre.</p>}
+        {!ajustes.clavePuerta && <p className="aviso aviso">Escribe la clave de la puerta: sin ella no se descarga el padrón ni se envían los ingresos.</p>}
+        <p className="tenue">El 15 de octubre el celular se pone solo en Día 1 y el 16 en Día 2. También se puede cambiar aquí o en el escáner.</p>
       </section>
 
       <section className="bloque">

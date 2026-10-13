@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import ScannerComponent from '../components/ScannerComponent';
 import SemaphoreOverlay from '../components/SemaphoreOverlay';
@@ -6,7 +6,7 @@ import Encabezado from '../components/Encabezado';
 import { procesarEscaneo } from '../qr/escanear';
 import { sincronizarCola } from '../sync/sync';
 import { db } from '../db';
-import { leerAjustes } from '../config';
+import { leerAjustes, guardarAjustes } from '../config';
 import { useEnLinea } from '../useEnLinea';
 
 const sonar = (archivo) => new Audio(archivo).play().catch(() => {});
@@ -35,8 +35,15 @@ export default function Escaner() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [escaneoId, setEscaneoId] = useState(0);
   const [ultimo, setUltimo] = useState(null); // último resultado, queda visible en la tarjeta
-  const ajustes = leerAjustes();
+  const [ajustes, setAjustes] = useState(leerAjustes);
   const dia = Number(ajustes.dia);
+  const cambiarDia = (d) => setAjustes(guardarAjustes({ dia: d }));
+
+  // Si el día cambia solo (a medianoche) o desde Ajustes, la pantalla se entera
+  useEffect(() => {
+    const timer = setInterval(() => setAjustes(leerAjustes()), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const totalPadron = useLiveQuery(() => db.estudiantes.count(), [], null);
   const pendientes = useLiveQuery(() => db.cola_checkins.where('sincronizado').equals(0).count(), [], 0);
@@ -87,8 +94,19 @@ export default function Escaner() {
         <section className="tarjeta tarjeta-camara" aria-label="Cámara">
           <div className="tarjeta-cab">
             <span className="vivo"><span className="punto" />Cámara de acceso lista</span>
-            <span className="chip neutro">Cámara trasera</span>
+            <div className="segmentos" role="group" aria-label="Día del simposio">
+              {[1, 2].map(d => (
+                <button key={d} type="button" className={dia === d ? 'activo' : undefined}
+                  aria-pressed={dia === d} onClick={() => cambiarDia(d)}>Día {d}</button>
+              ))}
+            </div>
           </div>
+          {!ajustes.clavePuerta && (
+            <p className="aviso aviso" role="status">
+              <b>Falta la clave de la puerta.</b> Sin ella no se descarga el padrón ni se envían los ingresos.{' '}
+              <a href="#/ajustes">Ir a ajustes</a>
+            </p>
+          )}
           {sinPadron && (
             <p className="aviso aviso" role="status">
               <b>Este celular no tiene el padrón.</b>{' '}
