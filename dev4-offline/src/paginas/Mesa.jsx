@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { leerAjustes } from '../config';
 import { useEnLinea } from '../useEnLinea';
 import { buscar, vincularBoleta, registrarIngreso, reenviarQr } from '../sync/mesa';
+import { enviarAhora } from '../sync/envio';
 
 const ZONAS = { VERDE: 'ok', AMARILLA: 'aviso', ROJA: 'mal', PENDIENTE: 'aviso' };
 const hora = (iso) => new Date(iso).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' });
@@ -26,9 +27,13 @@ function TarjetaEstudiante({ e, sesion, alCambiar }) {
   const entro = (d) => e.ingresos.some(i => i.dia === d);
   const boletaVerde = e.boletas.find(b => b.zona === 'VERDE')?.boleta ?? null;
 
-  async function hacer(fn) {
+  async function hacer(fn, enviar = false) {
     setOcupado(true);
-    const res = await fn();
+    let res = await fn();
+    if (res.ok && enviar) {
+      const env = await enviarAhora();
+      res = { ...res, mensaje: env.ok ? 'El QR se está enviando; llegará en 1 o 2 minutos.' : res.mensaje };
+    }
     setR(res); setOcupado(false);
     if (res.ok) alCambiar();
   }
@@ -59,7 +64,7 @@ function TarjetaEstudiante({ e, sesion, alCambiar }) {
           Registrar ingreso del día {sesion.dia}
         </button>
         <button disabled={ocupado || !e.qr}
-          onClick={() => hacer(() => reenviarQr(sesion.clave, e.carnet, correo))}>
+          onClick={() => hacer(() => reenviarQr(sesion.clave, e.carnet, correo), true)}>
           Reenviar QR
         </button>
       </div>
@@ -77,6 +82,7 @@ function TarjetaBoleta({ b, sesion, alCambiar }) {
   async function asignar(c) {
     setOcupado(true);
     const res = await vincularBoleta(sesion.clave, b.boleta, c, sesion.operador, just);
+    if (res.ok) enviarAhora(); // el QR del nuevo dueño sale de inmediato
     setR(res); setOcupado(false);
     if (res.ok) alCambiar();
   }
@@ -118,6 +124,14 @@ export default function Mesa() {
   const [texto, setTexto] = useState('');
   const [res, setRes] = useState(null);
   const [buscando, setBuscando] = useState(false);
+  const [envio, setEnvio] = useState(null);
+  const [enviando, setEnviando] = useState(false);
+
+  async function enviarPendientes() {
+    setEnviando(true);
+    setEnvio(await enviarAhora());
+    setEnviando(false);
+  }
 
   async function hacerBusqueda(e) {
     e?.preventDefault();
@@ -160,6 +174,12 @@ export default function Mesa() {
         </form>
         {res && !res.ok && <p className="aviso mal">{res.mensaje}</p>}
         {nada && <p className="vacio">No se encontró nada. Revisa el carné o el número de boleta.</p>}
+        <div className="botones">
+          <button onClick={enviarPendientes} disabled={enviando || !enLinea}>
+            {enviando ? 'Iniciando envío…' : 'Enviar QR pendientes ahora'}
+          </button>
+        </div>
+        <Aviso r={envio} />
       </section>
 
       {res?.ok && res.estudiantes.length > 0 && <h2>Estudiantes</h2>}

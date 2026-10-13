@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { resolverExcepcion } from '../sync/portal';
+import { enviarAhora } from '../sync/envio';
 import { useEnLinea } from '../useEnLinea';
 
 // La boleta puede venir en el enlace del correo: #/portal?boleta=B-10232
@@ -22,7 +23,9 @@ export default function Portal() {
       return;
     }
     setEnviando(true);
-    setRespuesta(await resolverExcepcion(carnet, boleta));
+    const r = await resolverExcepcion(carnet, boleta);
+    if (r.ok) enviarAhora(); // el QR sale de inmediato; si falla, lo envía el ciclo automático
+    setRespuesta(r);
     setEnviando(false);
   }
 
@@ -39,7 +42,7 @@ export default function Portal() {
         <section className="bloque">
           <div className="resultado ok">
             <b>Listo, {respuesta.nombre}</b>
-            <span>Tu boleta quedó vinculada al carné {carnet.trim()}. Recibirás tu QR de acceso en tu correo institucional.</span>
+            <span>Tu boleta quedó vinculada al carné {carnet.trim()}. En unos minutos recibirás tu QR de acceso en tu correo institucional (revisa también Correo no deseado).</span>
           </div>
         </section>
       ) : (
