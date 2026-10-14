@@ -13,6 +13,7 @@ async function llamar(funcion, args) {
 
 export const leerEstadisticas = (clave) => llamar('panel_estadisticas', { p_clave: clave });
 export const leerRegistros = (clave, tipo) => llamar('panel_registros', { p_clave: clave, p_tipo: tipo });
+export const aprobarEnvio = (clave) => llamar('panel_aprobar_envio', { p_clave: clave });
 
 // Arma el CSV (UTF-8 con BOM para que Excel respete las tildes) y lo descarga
 export function descargarCsv(filas, columnas, nombreArchivo) {

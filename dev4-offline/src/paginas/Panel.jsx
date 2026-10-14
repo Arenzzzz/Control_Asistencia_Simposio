@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Encabezado from '../components/Encabezado';
 import { useEnLinea } from '../useEnLinea';
-import { leerEstadisticas, leerRegistros, descargarCsv } from '../sync/panel';
+import { leerEstadisticas, leerRegistros, descargarCsv, aprobarEnvio } from '../sync/panel';
+import { enviarAhora } from '../sync/envio';
 
 const CLAVE_SESION = 'simposio-panel-clave';
 const leerClave = () => { try { return sessionStorage.getItem(CLAVE_SESION) || ''; } catch { return ''; } };
@@ -149,6 +150,9 @@ export default function Panel() {
   const [cargando, setCargando] = useState(false);
   const [dia, setDia] = useState(1);
   const [descargando, setDescargando] = useState(null);
+  const [aprobando, setAprobando] = useState(false);
+  const [confirmar, setConfirmar] = useState(false);
+  const [avisoEnvio, setAvisoEnvio] = useState(null);
   const [avisoCsv, setAvisoCsv] = useState(null);
 
   const cargar = useCallback(async (c) => {
@@ -169,6 +173,17 @@ export default function Panel() {
     const timer = setInterval(() => cargar(clave), 30000);
     return () => { clearTimeout(primera); clearInterval(timer); };
   }, [clave, cargar]);
+
+  // Aprueba los correos que esperan (QR del autómata y avisos del portal) y pide el envío
+  async function aprobar() {
+    setAprobando(true); setConfirmar(false); setAvisoEnvio(null);
+    const r = await aprobarEnvio(clave);
+    if (!r.ok) { setAprobando(false); setAvisoEnvio({ ok: false, mensaje: r.mensaje }); return; }
+    const env = await enviarAhora();
+    setAprobando(false);
+    setAvisoEnvio({ ok: true, mensaje: `${r.mensaje} ${env.ok ? 'Los correos salen en 1 o 2 minutos.' : env.mensaje}` });
+    cargar(clave);
+  }
 
   async function descargar(d) {
     setDescargando(d.tipo); setAvisoCsv(null);
@@ -213,11 +228,43 @@ export default function Panel() {
 
         {datos && (
           <>
+            <section className="tarjeta aprobacion">
+              <div className="tarjeta-titulo">
+                <h2>Correos por aprobar</h2>
+                <span className="tenue">No sale nada hasta que lo aprueben</span>
+              </div>
+              {(() => {
+                const qr = datos.qr.por_aprobar ?? 0, avisos = datos.avisos?.por_aprobar ?? 0;
+                if (!qr && !avisos) return <p className="tenue">No hay correos esperando aprobación. Los del portal y la mesa salen solos.</p>;
+                return (
+                  <>
+                    <p>
+                      <b>{num(qr)}</b> QR de boletas verdes y <b>{num(avisos)}</b> avisos del portal para boletas amarillas.
+                      Revisen el CSV de boletas antes de aprobar.
+                    </p>
+                    {confirmar ? (
+                      <div className="botones">
+                        <button className="principal" onClick={aprobar} disabled={aprobando || !enLinea}>
+                          {aprobando ? 'Aprobando…' : `Sí, enviar ${num(qr + avisos)} correos`}
+                        </button>
+                        <button onClick={() => setConfirmar(false)} disabled={aprobando}>Cancelar</button>
+                      </div>
+                    ) : (
+                      <div className="botones">
+                        <button className="principal" onClick={() => setConfirmar(true)} disabled={!enLinea}>Aprobar y enviar</button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+              {avisoEnvio && <p className={`aviso ${avisoEnvio.ok ? 'ok' : 'mal'}`} role="status" style={{ marginTop: 10 }}>{avisoEnvio.mensaje}</p>}
+            </section>
+
             <section className="tiles" aria-label="Resumen">
               <Tile etiqueta="Pagos validados" valor={num(verdes)}
                 detalle={`de ${num(datos.boletas.total)} boletas · Q${num(datos.boletas.monto_verde)}`} />
               <Tile etiqueta="QR enviados" valor={num(datos.qr.enviados)}
-                detalle={datos.qr.generados - datos.qr.enviados > 0 ? `${num(datos.qr.generados - datos.qr.enviados)} por enviar` : 'Ninguno pendiente'} />
+                detalle={datos.qr.por_aprobar ? `${num(datos.qr.por_aprobar)} esperan aprobación` : datos.qr.generados - datos.qr.enviados > 0 ? `${num(datos.qr.generados - datos.qr.enviados)} por enviar` : 'Ninguno pendiente'} />
               <Tile etiqueta="Ingresos día 1" valor={num(ing.dia1)} detalle={`${pct(ing.dia1, verdes)} de los pagos validados`} />
               <Tile etiqueta="Ingresos día 2" valor={num(ing.dia2)} detalle={`${num(ing.ambos)} asistieron los dos días`} />
             </section>

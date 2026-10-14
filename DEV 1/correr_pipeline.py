@@ -73,24 +73,38 @@ def generar_credenciales(conn_url: str, vence_epoch: int) -> int:
 
     Cubre las verdes del pipeline y las que se resolvieron después en el portal
     o en la mesa. Se puede correr las veces que haga falta: no repite QR.
+    Los QR del autómata quedan por aprobar (botón "Aprobar y enviar" del Panel);
+    los del portal y la mesa ya los revisó una persona y quedan aprobados.
     """
     with psycopg.connect(conn_url) as conn:
         with conn.cursor() as cur:
+            # La columna aprobado la agrega 10_aprobacion.sql
+            cur.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'credenciales_qr' AND column_name = 'aprobado');")
+            con_aprobacion = cur.fetchone()[0]
             cur.execute("""
-                SELECT DISTINCT ON (t.carnet_asignado) t.carnet_asignado, t.boleta
+                SELECT DISTINCT ON (t.carnet_asignado) t.carnet_asignado, t.boleta,
+                       coalesce(t.estado, '') IN ('CONCILIADO', 'RESUELTO_MANUAL') AS revisada
                 FROM tesoreria_pagos t
                 WHERE t.zona = 'VERDE' AND t.carnet_asignado IS NOT NULL
                   AND NOT EXISTS (SELECT 1 FROM credenciales_qr c WHERE c.carnet = t.carnet_asignado)
                 ORDER BY t.carnet_asignado, t.boleta;
             """)
             pendientes = cur.fetchall()
-            for carnet, boleta in pendientes:
+            for carnet, boleta, revisada in pendientes:
                 token = sign_qr(str(carnet), vence_epoch)
-                cur.execute(
-                    "INSERT INTO credenciales_qr (carnet, token_qr, boleta_origen) VALUES (%s, %s, %s) "
-                    "ON CONFLICT (carnet) DO NOTHING;",
-                    (carnet, token, boleta),
-                )
+                if con_aprobacion:
+                    cur.execute(
+                        "INSERT INTO credenciales_qr (carnet, token_qr, boleta_origen, aprobado) "
+                        "VALUES (%s, %s, %s, %s) ON CONFLICT (carnet) DO NOTHING;",
+                        (carnet, token, boleta, revisada),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO credenciales_qr (carnet, token_qr, boleta_origen) VALUES (%s, %s, %s) "
+                        "ON CONFLICT (carnet) DO NOTHING;",
+                        (carnet, token, boleta),
+                    )
         conn.commit()
     return len(pendientes)
 
@@ -160,6 +174,8 @@ def main(argv=None):
 
     nuevas = generar_credenciales(db_url, vence)
     print(f"QR firmados: {nuevas} (válidos hasta {a.vence} 23:59, hora de Guatemala).")
+    if nuevas and not a.solo_credenciales:
+        print("Los QR nuevos del autómata no se envían hasta presionar \"Aprobar y enviar\" en el Panel.")
 
 
 if __name__ == "__main__":

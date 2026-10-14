@@ -2,6 +2,8 @@
 
 - Zona VERDE: el QR firmado de cada estudiante (una sola vez por credencial).
 - Zona AMARILLA: aviso a los candidatos de cada boleta para que confirmen en el portal.
+- Solo se envía lo aprobado: los QR del autómata y los avisos esperan el botón
+  "Aprobar y enviar" del Panel; los del portal y la mesa salen de inmediato.
 
 Lee la base con DATABASE_URL y envía por SMTP (sirve Gmail, el correo de la
 universidad o el SMTP de Resend). Marca cada envío en la base, así que se puede
@@ -119,6 +121,8 @@ def enviar_verdes(conn, correo: Correo, limite: int, carnets: list[str] | None =
             SELECT c.carnet, p.nombre_oficial, p.correo_institucional, c.token_qr
             FROM credenciales_qr c JOIN padron_estudiantes p USING (carnet)
             WHERE c.enviado_en IS NULL
+              -- Solo los aprobados (10_aprobacion.sql); si la columna no existe, todos
+              AND coalesce((to_jsonb(c)->>'aprobado')::boolean, TRUE)
               AND (%s::text[] IS NULL OR c.carnet = ANY(%s::text[]))
             ORDER BY c.carnet LIMIT %s;
         """, (carnets, carnets, limite))
@@ -145,6 +149,7 @@ def enviar_amarillas(conn, correo: Correo, limite: int, carnets: list[str] | Non
             FROM tesoreria_pagos
             WHERE zona = 'AMARILLA' AND carnet_asignado IS NULL
               AND NOT (datos_extra ? 'aviso_portal_enviado')
+              AND datos_extra ? 'aviso_aprobado'  -- aprobado en el Panel
               AND (%s::text[] IS NULL OR EXISTS (
                     SELECT 1 FROM jsonb_array_elements(datos_extra->'candidatos') c
                     WHERE c->>'carnet' = ANY(%s::text[])))
