@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import Encabezado from '../components/Encabezado';
+import Acceso from '../components/Acceso';
+import { leerSesion, guardarSesion, cerrarSesion } from '../sync/acceso';
 import { useEnLinea } from '../useEnLinea';
 import { leerEstadisticas, leerRegistros, descargarCsv, aprobarEnvio } from '../sync/panel';
 import { enviarAhora } from '../sync/envio';
 
-const CLAVE_SESION = 'simposio-panel-clave';
-const leerClave = () => { try { return sessionStorage.getItem(CLAVE_SESION) || ''; } catch { return ''; } };
-const guardarClave = (c) => { try { sessionStorage.setItem(CLAVE_SESION, c); } catch { /* sin almacenamiento */ } };
+// La sesión es la misma de la mesa: con entrar en una, la otra ya queda abierta
+const leerClave = () => leerSesion('mesa');
+const guardarClave = (c) => (c ? guardarSesion('mesa', c) : cerrarSesion('mesa'));
 
 const num = (n) => Number(n ?? 0).toLocaleString('es-GT');
 const pct = (a, b) => (b ? `${Math.round((a / b) * 100)} %` : '—');
@@ -28,6 +30,10 @@ const DESCARGAS = [
   {
     tipo: 'asistencia', titulo: 'Asistencia por estudiante', detalle: 'Cada estudiante con pago validado: boleta, QR enviado y si entró cada día.',
     columnas: [['carne', 'Carné'], ['nombre', 'Nombre'], ['correo', 'Correo'], ['boleta', 'Boleta'], ['qr_enviado', 'QR enviado'], ['ingreso_dia_1', 'Ingreso día 1'], ['ingreso_dia_2', 'Ingreso día 2'], ['asistencia', 'Asistencia']],
+  },
+  {
+    tipo: 'correos', titulo: 'Estado de los correos', detalle: 'Cada QR y aviso del portal: por aprobar, aprobado o enviado, con correo y boleta.',
+    columnas: [['estado', 'Estado'], ['tipo', 'Tipo'], ['carne', 'Carné'], ['nombre', 'Nombre'], ['correo', 'Correo'], ['boleta', 'Boleta'], ['enviado', 'Enviado'], ['candidatos', 'Candidatos (avisos)']],
   },
   {
     tipo: 'boletas', titulo: 'Boletas de Tesorería', detalle: 'Todas las boletas con su zona, estado, carné asignado y motivo.',
@@ -144,7 +150,6 @@ function Zonas({ b }) {
 export default function Panel() {
   const enLinea = useEnLinea();
   const [clave, setClave] = useState(leerClave);
-  const [entrada, setEntrada] = useState('');
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
   const [cargando, setCargando] = useState(false);
@@ -160,11 +165,12 @@ export default function Panel() {
     const r = await leerEstadisticas(c);
     setCargando(false);
     if (r.ok) { setDatos(r); setError(null); guardarClave(c); setClave(c); }
-    else {
-      setError(r.mensaje);
-      if (/clave/i.test(r.mensaje)) { setClave(''); guardarClave(''); setDatos(null); }
-    }
+    else if (/clave/i.test(r.mensaje)) { setClave(''); guardarClave(''); setDatos(null); }
+    else setError(r.mensaje);
+    return r;
   }, []);
+
+  function salir() { guardarClave(''); setClave(''); setDatos(null); }
 
   // Con la clave puesta, se actualiza solo cada 30 segundos
   useEffect(() => {
@@ -202,28 +208,24 @@ export default function Panel() {
   return (
     <>
       <Encabezado activa="panel" enLinea={enLinea} detalle={['Panel de estadísticas']} />
+      {!clave ? (
+        <Acceso titulo="Panel de estadísticas" etiqueta="Clave de la mesa"
+          descripcion="Pagos, correos e ingresos del simposio en tiempo real."
+          ayuda="Es la misma clave de la mesa de resolución."
+          onEntrar={async (c) => { const r = await cargar(c); return r.ok ? r : { ok: false, mensaje: r.mensaje || 'Clave incorrecta.' }; }} />
+      ) : (
       <div className="pagina ancha">
         <div className="titulo-pagina titulo-panel">
           <div>
             <h1>Panel de estadísticas</h1>
-            <p>{datos ? `Actualizado a las ${actualizado} · se actualiza solo cada 30 segundos.` : 'Pagos, QR enviados e ingresos del simposio en tiempo real.'}</p>
+            <p>{datos ? `Actualizado a las ${actualizado} · se actualiza solo cada 30 segundos.` : 'Cargando…'}</p>
           </div>
-          {datos && <button onClick={() => cargar(clave)} disabled={cargando || !enLinea}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>}
+          <div className="botones" style={{ marginTop: 0 }}>
+            <button onClick={() => cargar(clave)} disabled={cargando || !enLinea}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
+            <button onClick={salir}>Salir</button>
+          </div>
         </div>
 
-        {!clave && (
-          <section className="bloque">
-            <form className="botones" style={{ marginTop: 0 }} onSubmit={e => { e.preventDefault(); if (entrada) cargar(entrada); }}>
-              <label className="ancho">Clave de la mesa
-                <input type="password" value={entrada} onChange={e => setEntrada(e.target.value)} autoComplete="current-password" />
-              </label>
-              <button className="principal" type="submit" disabled={cargando || !enLinea || !entrada} style={{ alignSelf: 'flex-end' }}>
-                {cargando ? 'Entrando…' : 'Ver panel'}
-              </button>
-            </form>
-            <p className="tenue">Es la misma clave de la mesa de resolución.</p>
-          </section>
-        )}
         {error && <p className="aviso mal" role="alert">{error}</p>}
 
         {datos && (
@@ -323,6 +325,7 @@ export default function Panel() {
           </>
         )}
       </div>
+      )}
     </>
   );
 }

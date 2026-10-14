@@ -8,6 +8,8 @@ import { procesarEscaneo } from '../qr/escanear';
 import { TOKEN_VALIDO } from '../qr/tokensPrueba';
 import { useEnLinea } from '../useEnLinea';
 import Encabezado from '../components/Encabezado';
+import Acceso from '../components/Acceso';
+import { leerSesion, guardarSesion, cerrarSesion, validarClave } from '../sync/acceso';
 
 const RESULTADOS = {
   ok: ['Puede ingresar', 'ok'],
@@ -29,6 +31,27 @@ export default function Puerta() {
   const [resultado, setResultado] = useState(null);
   const [confirmarBorrado, setConfirmarBorrado] = useState(false);
   const [protegido, setProtegido] = useState(null);
+  const [abierta, setAbierta] = useState(() => Boolean(leerSesion('puerta')));
+
+  // Entrar a Ajustes: con internet lo valida el servidor y la clave queda guardada para
+  // descargar el padrón y enviar ingresos. Sin internet se compara con la ya guardada.
+  async function entrar(c) {
+    const r = await validarClave('puerta', c);
+    if (r.ok) {
+      setAjustes(guardarAjustes({ clavePuerta: c }));
+    } else if (r.sinConexion) {
+      const guardada = leerAjustes().clavePuerta;
+      if (!guardada) return { ok: false, mensaje: 'Sin internet. La primera vez hay que conectarse para configurar este celular.' };
+      if (c !== guardada) return { ok: false, mensaje: 'Clave incorrecta.' };
+    } else {
+      return r;
+    }
+    guardarSesion('puerta', '1');
+    setAbierta(true);
+    return { ok: true };
+  }
+
+  function salir() { cerrarSesion('puerta'); setAbierta(false); }
 
   // El padrón se actualiza en segundo plano (useMantenimiento); aquí solo se refresca la fecha mostrada
   useEffect(() => {
@@ -85,10 +108,18 @@ export default function Puerta() {
     <>
     <Encabezado activa="ajustes" enLinea={enLinea} destacado={1}
       detalle={['Ajustes de puerta', ajustes.staffId || 'Sin operador', `Puerta ${ajustes.puerta}`, `Día ${ajustes.dia}`]} />
+    {!abierta ? (
+      <Acceso titulo="Ajustes de puerta" etiqueta="Clave de la puerta" onEntrar={entrar} permitirSinConexion
+        descripcion="Configuración de este celular, padrón y herramientas de prueba."
+        ayuda="La da coordinación. Al entrar, queda guardada para descargar el padrón y enviar los ingresos." />
+    ) : (
     <div className="pagina">
-      <div className="titulo-pagina">
-        <h1>Ajustes de puerta</h1>
-        <p>Configuración de este celular, padrón y herramientas de prueba.</p>
+      <div className="titulo-pagina titulo-panel">
+        <div>
+          <h1>Ajustes de puerta</h1>
+          <p>Configuración de este celular, padrón y herramientas de prueba.</p>
+        </div>
+        <button onClick={salir}>Salir</button>
       </div>
 
       <section className="resumen">
@@ -111,10 +142,6 @@ export default function Puerta() {
               {['1', '2', '3', '4'].map(p => <option key={p} value={p}>Puerta {p}</option>)}
             </select>
           </label>
-          <label>Clave de la puerta
-            <input id="clave-puerta" type="password" value={ajustes.clavePuerta} placeholder="La da coordinación"
-              autoComplete="off" onChange={e => cambiar('clavePuerta', e.target.value.trim())} />
-          </label>
           <label>Día
             <select id="dia" value={ajustes.dia} onChange={e => cambiar('dia', Number(e.target.value))}>
               <option value={1}>Día 1</option>
@@ -123,7 +150,7 @@ export default function Puerta() {
           </label>
         </div>
         {sinStaff && <p className="tenue">Escribe el operador para que cada ingreso quede registrado con su nombre.</p>}
-        {!ajustes.clavePuerta && <p className="aviso aviso">Escribe la clave de la puerta: sin ella no se descarga el padrón ni se envían los ingresos.</p>}
+        <p className="tenue">La clave de la puerta quedó guardada en este celular al entrar a Ajustes. Para cambiarla, sal y vuelve a entrar con la nueva.</p>
         <p className="tenue">El 15 de octubre el celular se pone solo en Día 1 y el 16 en Día 2. También se puede cambiar aquí o en el escáner.</p>
       </section>
 
@@ -186,6 +213,7 @@ export default function Puerta() {
         ) : <button onClick={() => setConfirmarBorrado(true)}>Borrar datos</button>}
       </section>
     </div>
+    )}
     </>
   );
 }

@@ -4,6 +4,8 @@ import { useEnLinea } from '../useEnLinea';
 import { buscar, vincularBoleta, registrarIngreso, reenviarQr } from '../sync/mesa';
 import { enviarAhora } from '../sync/envio';
 import Encabezado from '../components/Encabezado';
+import Acceso from '../components/Acceso';
+import { leerSesion, guardarSesion, cerrarSesion, validarClave } from '../sync/acceso';
 
 const ZONAS = { VERDE: 'ok', AMARILLA: 'aviso', ROJA: 'mal', PENDIENTE: 'aviso' };
 const hora = (iso) => new Date(iso).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' });
@@ -20,7 +22,6 @@ function Aviso({ r }) {
 }
 
 function TarjetaEstudiante({ e, sesion, alCambiar }) {
-  const [just, setJust] = useState('');
   const [correo, setCorreo] = useState('');
   const [r, setR] = useState(null);
   const [ocupado, setOcupado] = useState(false);
@@ -52,16 +53,13 @@ function TarjetaEstudiante({ e, sesion, alCambiar }) {
         <span className={`chip ${entro(2) ? 'ok' : 'aviso'}`}>Día 2: {entro(2) ? 'ingresó' : 'no'}</span>
       </div>
       <div className="campos" style={{ marginTop: 10 }}>
-        <label>Justificación
-          <input value={just} onChange={ev => setJust(ev.target.value)} placeholder="Ej. presentó DPI y comprobante" />
-        </label>
         <label>Correo nuevo (opcional)
           <input value={correo} onChange={ev => setCorreo(ev.target.value)} placeholder="Para reenviar el QR a otro correo" type="email" />
         </label>
       </div>
       <div className="botones">
         <button className="principal" disabled={ocupado || entro(sesion.dia)}
-          onClick={() => hacer(() => registrarIngreso(sesion.clave, e.carnet, boletaVerde, sesion.dia, sesion.operador, just))}>
+          onClick={() => hacer(() => registrarIngreso(sesion.clave, e.carnet, boletaVerde, sesion.dia, sesion.operador, `Ingreso registrado en la mesa por ${sesion.operador}`))}>
           Registrar ingreso del día {sesion.dia}
         </button>
         <button disabled={ocupado || !e.qr}
@@ -75,14 +73,13 @@ function TarjetaEstudiante({ e, sesion, alCambiar }) {
 }
 
 function TarjetaBoleta({ b, sesion, alCambiar }) {
-  const [just, setJust] = useState('');
   const [carnet, setCarnet] = useState('');
   const [r, setR] = useState(null);
   const [ocupado, setOcupado] = useState(false);
 
   async function asignar(c) {
     setOcupado(true);
-    const res = await vincularBoleta(sesion.clave, b.boleta, c, sesion.operador, just);
+    const res = await vincularBoleta(sesion.clave, b.boleta, c, sesion.operador, `Boleta asignada en la mesa por ${sesion.operador}`);
     if (res.ok) enviarAhora(); // el QR del nuevo dueño sale de inmediato
     setR(res); setOcupado(false);
     if (res.ok) alCambiar();
@@ -96,9 +93,6 @@ function TarjetaBoleta({ b, sesion, alCambiar }) {
         <span className={`chip ${ZONAS[b.zona] ?? 'aviso'}`}>{b.zona}</span>
         {b.motivo && <span className="chip aviso">{b.motivo}</span>}
       </div>
-      <label style={{ marginTop: 10 }}>Justificación
-        <input value={just} onChange={ev => setJust(ev.target.value)} placeholder="Ej. comprobante original revisado" />
-      </label>
       {b.candidatos.length > 0 && (
         <div className="botones">
           {b.candidatos.map(c => (
@@ -120,7 +114,7 @@ function TarjetaBoleta({ b, sesion, alCambiar }) {
 export default function Mesa() {
   const enLinea = useEnLinea();
   const [operador, setOperador] = useState(() => leerAjustes().staffId || '');
-  const [clave, setClave] = useState('');
+  const [clave, setClave] = useState(() => leerSesion('mesa'));
   const [dia, setDia] = useState(() => leerAjustes().dia || 1);
   const [texto, setTexto] = useState('');
   const [res, setRes] = useState(null);
@@ -134,15 +128,25 @@ export default function Mesa() {
     setEnviando(false);
   }
 
+  async function entrar(c) {
+    const r = await validarClave('mesa', c);
+    if (r.ok) { guardarSesion('mesa', c); setClave(c); }
+    return r;
+  }
+
+  function salir() { cerrarSesion('mesa'); setClave(''); setRes(null); }
+
   async function hacerBusqueda(e) {
     e?.preventDefault();
-    if (!clave || texto.trim().length < 3) {
-      setRes({ ok: false, mensaje: !clave ? 'Escribe la clave de la mesa.' : 'Escribe al menos 3 caracteres.' });
+    if (texto.trim().length < 3) {
+      setRes({ ok: false, mensaje: 'Escribe al menos 3 caracteres.' });
       return;
     }
     setBuscando(true);
-    setRes(await buscar(clave, texto));
+    const r = await buscar(clave, texto);
     setBuscando(false);
+    if (!r.ok && /clave/i.test(r.mensaje)) { salir(); return; } // la clave cambió: se vuelve a pedir
+    setRes(r);
   }
 
   const sesion = { clave, operador: operador.trim() || 'Mesa', dia: Number(dia) };
@@ -152,16 +156,23 @@ export default function Mesa() {
     <>
     <Encabezado activa="mesa" enLinea={enLinea} destacado={1}
       detalle={['Mesa de resolución', operador.trim() || 'Sin operador', `Día ${dia}`]} />
+    {!clave ? (
+      <Acceso titulo="Mesa de resolución" etiqueta="Clave de la mesa" onEntrar={entrar}
+        descripcion="Búsqueda y soporte por carné ilegible, QR perdido o boleta física."
+        ayuda="La misma clave abre el Panel." />
+    ) : (
     <div className="pagina">
-      <div className="titulo-pagina">
-        <h1>Mesa de resolución</h1>
-        <p>Búsqueda y soporte por carné ilegible, QR perdido o boleta física.</p>
+      <div className="titulo-pagina titulo-panel">
+        <div>
+          <h1>Mesa de resolución</h1>
+          <p>Búsqueda y soporte por carné ilegible, QR perdido o boleta física.</p>
+        </div>
+        <button onClick={salir}>Salir</button>
       </div>
 
       <section className="bloque">
         <div className="campos">
           <label>Operador<input value={operador} onChange={e => setOperador(e.target.value)} placeholder="Nombre de quien atiende" /></label>
-          <label>Clave de la mesa<input type="password" value={clave} onChange={e => setClave(e.target.value)} autoComplete="current-password" /></label>
           <label>Día
             <select value={dia} onChange={e => setDia(Number(e.target.value))}>
               <option value={1}>Día 1</option><option value={2}>Día 2</option>
@@ -187,6 +198,7 @@ export default function Mesa() {
       {res?.ok && res.boletas.length > 0 && <h2>Boletas sin dueño</h2>}
       {res?.ok && res.boletas.map(b => <TarjetaBoleta key={b.boleta} b={b} sesion={sesion} alCambiar={hacerBusqueda} />)}
     </div>
+    )}
     </>
   );
 }
