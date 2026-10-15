@@ -8,7 +8,9 @@
 #   CARNETS_PRUEBA  carnés separados por comas para las pruebas (solo a ellos se les envía)
 #   ENVIO_REAL      "si" para enviar a todos (y borrar CARNETS_PRUEBA)
 #   VENCE           último día del simposio (por defecto 2026-10-16)
-#   LIMITE          correos por ciclo (por defecto 40)
+#   LIMITE          correos por ciclo (por defecto 500: todo lo pendiente)
+#   PAUSA_SEG       segundos entre correos (por defecto 3, unos 20 por minuto; Microsoft permite 30)
+# Secreto opcional SMTP_REPLY_TO: a dónde llegan las respuestas de los estudiantes (para no llenar el correo que envía)
 # Si no hay CARNETS_PRUEBA ni ENVIO_REAL=si, el ciclo no corre: así nunca se envía a todos por error.
 
 name: Envío automático de QR
@@ -26,7 +28,7 @@ jobs:
   ciclo:
     if: vars.CARNETS_PRUEBA != '' || vars.ENVIO_REAL == 'si'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45   # 500 correos a 3 s cada uno son unos 25 minutos
     env:
       TZ: America/Guatemala
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -35,8 +37,10 @@ jobs:
       SMTP_USER: ${{ secrets.SMTP_USER }}
       SMTP_PASS: ${{ secrets.SMTP_PASS }}
       SMTP_FROM: ${{ secrets.SMTP_FROM }}
+      SMTP_REPLY_TO: ${{ secrets.SMTP_REPLY_TO }}
       VENCE: ${{ vars.VENCE || '2026-10-16' }}
-      LIMITE: ${{ vars.LIMITE || '40' }}
+      LIMITE: ${{ vars.LIMITE || '500' }}
+      PAUSA_SEG: ${{ vars.PAUSA_SEG || '3' }}
       CARNETS_PRUEBA: ${{ vars.ENVIO_REAL != 'si' && vars.CARNETS_PRUEBA || '' }}
     steps:
       - uses: actions/checkout@v4

@@ -37,7 +37,12 @@ import segno
 
 PORTAL = "https://simposio-xix-url.netlify.app/#/portal"
 FECHAS = "jueves 15 y viernes 16 de octubre"
-PAUSA_SEG = float(os.environ.get("PAUSA_SEG", "1.0"))  # entre correos, para no superar los límites del proveedor
+# Pausa entre correos: Microsoft 365 permite unos 30 por minuto por cuenta; con 3 s salen unos 20
+PAUSA_SEG = float(os.environ.get("PAUSA_SEG", "3"))
+
+
+class EnvioDetenido(Exception):
+    """El servidor de correo rechazó el envío (límite de envío, sesión cerrada, etc.)."""
 
 
 def qr_png(token: str) -> bytes:
@@ -100,6 +105,8 @@ class Correo:
         if faltan:
             sys.exit(f"Error: faltan las variables {', '.join(faltan)}")
         self.remitente = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
+        # Las respuestas de los estudiantes van a esta dirección y no al correo que envía
+        self.responder_a = os.environ.get("SMTP_REPLY_TO", "").strip()
         self.smtp = smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587")), timeout=30)
         if os.environ.get("SMTP_SIN_TLS") != "1":
             self.smtp.starttls()
@@ -108,11 +115,22 @@ class Correo:
     def enviar(self, para: str, m: EmailMessage) -> None:
         m["From"] = self.remitente
         m["To"] = para
-        self.smtp.send_message(m)
+        if self.responder_a:
+            m["Reply-To"] = self.responder_a
+        try:
+            self.smtp.send_message(m)
+        except smtplib.SMTPRecipientsRefused:
+            raise  # solo ese correo está mal: se sigue con los demás
+        except (smtplib.SMTPException, OSError) as e:
+            # Límite de envío o sesión cerrada: se detiene la tanda y lo pendiente sale en el siguiente ciclo
+            raise EnvioDetenido(str(e)) from e
         time.sleep(PAUSA_SEG)
 
     def cerrar(self):
-        self.smtp.quit()
+        try:
+            self.smtp.quit()
+        except (smtplib.SMTPException, OSError):
+            pass  # la sesión ya estaba cerrada
 
 
 def enviar_verdes(conn, correo: Correo, limite: int, carnets: list[str] | None = None) -> int:
@@ -217,12 +235,18 @@ def main(argv=None):
                 correo.enviar(a.prueba, correo_amarillo("Estudiante de prueba"))
                 print(f"Ejemplos enviados a {a.prueba}. No se marcó nada en la base.")
                 return
-            if a.verdes:
-                n = enviar_verdes(conn, correo, a.limite, carnets)
-                print(f"QR enviados en esta corrida: {n}")
-            if a.amarillas:
-                n = enviar_amarillas(conn, correo, a.limite, carnets)
-                print(f"Avisos del portal enviados en esta corrida: {n}")
+            try:
+                if a.verdes:
+                    n = enviar_verdes(conn, correo, a.limite, carnets)
+                    print(f"QR enviados en esta corrida: {n}")
+                if a.amarillas:
+                    n = enviar_amarillas(conn, correo, a.limite, carnets)
+                    print(f"Avisos del portal enviados en esta corrida: {n}")
+            except EnvioDetenido as e:
+                # Lo que ya salió quedó marcado; el resto se envía en el siguiente ciclo
+                print(f"Envío detenido por el servidor de correo: {e}")
+                print("Lo pendiente se enviará en el siguiente ciclo. Si se repite, esperar unos minutos.")
+                sys.exit(1)
     finally:
         correo.cerrar()
 
