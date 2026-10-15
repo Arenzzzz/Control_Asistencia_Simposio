@@ -39,6 +39,8 @@ PORTAL = "https://simposio-xix-url.netlify.app/#/portal"
 FECHAS = "jueves 15 y viernes 16 de octubre"
 # Pausa entre correos: Microsoft 365 permite unos 30 por minuto por cuenta; con 3 s salen unos 20
 PAUSA_SEG = float(os.environ.get("PAUSA_SEG", "3"))
+POR_SESION = int(os.environ.get("POR_SESION", "40"))  # correos por sesión antes de reconectar
+REINTENTOS = 3  # reconexiones por correo si el servidor corta la sesión
 
 
 class EnvioDetenido(Exception):
@@ -107,30 +109,57 @@ class Correo:
         self.remitente = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]
         # Las respuestas de los estudiantes van a esta dirección y no al correo que envía
         self.responder_a = os.environ.get("SMTP_REPLY_TO", "").strip()
+        self.smtp = None
+        self.en_sesion = 0
+        self.conectar()
+
+    def conectar(self):
+        """Abre (o vuelve a abrir) la sesión con el servidor de correo."""
+        self.cerrar()
         self.smtp = smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT", "587")), timeout=30)
         if os.environ.get("SMTP_SIN_TLS") != "1":
             self.smtp.starttls()
         self.smtp.login(os.environ["SMTP_USER"], os.environ["SMTP_PASS"])
+        self.en_sesion = 0
 
     def enviar(self, para: str, m: EmailMessage) -> None:
         m["From"] = self.remitente
         m["To"] = para
         if self.responder_a:
             m["Reply-To"] = self.responder_a
-        try:
-            self.smtp.send_message(m)
-        except smtplib.SMTPRecipientsRefused:
-            raise  # solo ese correo está mal: se sigue con los demás
-        except (smtplib.SMTPException, OSError) as e:
-            # Límite de envío o sesión cerrada: se detiene la tanda y lo pendiente sale en el siguiente ciclo
-            raise EnvioDetenido(str(e)) from e
+        # Microsoft cierra las sesiones largas: se abre una nueva cada cierto número de correos
+        if self.en_sesion >= POR_SESION:
+            self.conectar()
+        for intento in range(1, REINTENTOS + 1):
+            try:
+                self.smtp.send_message(m)
+                break
+            except smtplib.SMTPRecipientsRefused:
+                raise  # solo ese correo está mal: se sigue con los demás
+            except (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError) as e:
+                # Se cortó la sesión: se espera un poco, se vuelve a conectar y se reintenta el mismo correo
+                if intento == REINTENTOS:
+                    raise EnvioDetenido(str(e)) from e
+                print(f"  Sesión cerrada por el servidor ({e}); reconectando (intento {intento})…")
+                time.sleep(15 * intento)
+                try:
+                    self.conectar()
+                except (smtplib.SMTPException, OSError) as e2:
+                    raise EnvioDetenido(str(e2)) from e2
+            except (smtplib.SMTPException, OSError) as e:
+                # Límite de envío u otro rechazo: se detiene la tanda y lo pendiente sale en el siguiente ciclo
+                raise EnvioDetenido(str(e)) from e
+        self.en_sesion += 1
         time.sleep(PAUSA_SEG)
 
     def cerrar(self):
+        if self.smtp is None:
+            return
         try:
             self.smtp.quit()
         except (smtplib.SMTPException, OSError):
             pass  # la sesión ya estaba cerrada
+        self.smtp = None
 
 
 def enviar_verdes(conn, correo: Correo, limite: int, carnets: list[str] | None = None) -> int:
